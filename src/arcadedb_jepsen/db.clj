@@ -7,8 +7,7 @@
             [jepsen [control :as c]
                     [db :as db]
                     [util :as util]]
-            [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]))
+            [jepsen.control.util :as cu]))
 
 (def install-dir "/opt/arcadedb")
 (def data-dir "/opt/arcadedb/databases")
@@ -29,19 +28,17 @@
   (str/join "," (map #(str (name %) ":2424") (:nodes test))))
 
 (defn install!
-  "Downloads and installs ArcadeDB on a node."
+  "Downloads and installs ArcadeDB on a node.
+   Java and curl are expected to be pre-installed (see docker/Dockerfile.node)."
   [version]
   (info "Installing ArcadeDB" version)
-  (c/su
-    (debian/install ["openjdk-21-jdk-headless" "curl"])
-    (cu/install-archive! (node-url version) install-dir)))
+  (cu/install-archive! (node-url version) install-dir))
 
 (defn configure!
   "Writes ArcadeDB server configuration for HA mode."
   [test node]
   (info "Configuring ArcadeDB HA on" node)
-  (c/su
-    (c/exec :mkdir :-p config-dir)
+  (c/exec :mkdir :-p config-dir)
     ;; Write arcadedb-server.properties
     (c/exec :echo
             (str/join "\n"
@@ -54,54 +51,55 @@
                "arcadedb.ha.quorum=majority"
                "arcadedb.ha.replicationIncomingHost=0.0.0.0"
                "arcadedb.server.httpIncomingHost=0.0.0.0"])
-            :> (str config-dir "/arcadedb-server.properties"))))
+            :> (str config-dir "/arcadedb-server.properties")))
 
 (defn start!
   "Starts the ArcadeDB server."
   [test node]
   (info "Starting ArcadeDB on" node)
-  (c/su
-    (c/exec :bash :-c
-            (str "cd " install-dir " && "
-                 "JAVA_OPTS='-Darcadedb.server.rootPassword=" (:root-password test)
-                 " -Darcadedb.server.name=" (name node)
-                 " -Darcadedb.server.defaultDatabases=jepsen[root]"
-                 " -Darcadedb.ha.enabled=true"
-                 " -Darcadedb.ha.serverList=" (server-list test)
-                 " -Darcadedb.ha.clusterName=" (:cluster-name test "jepsen-cluster")
-                 " -Darcadedb.ha.quorum=majority"
-                 " -Darcadedb.ha.replicationIncomingHost=0.0.0.0"
-                 " -Darcadedb.server.httpIncomingHost=0.0.0.0"
-                 "' nohup bin/server.sh > /dev/null 2>&1 &"))
+  (let [java-opts (str "-Darcadedb.server.rootPassword=" (:root-password test)
+                       " -Darcadedb.server.name=" (name node)
+                       " -Darcadedb.server.defaultDatabases=jepsen[root]"
+                       " -Darcadedb.ha.enabled=true"
+                       " -Darcadedb.ha.serverList=" (server-list test)
+                       " -Darcadedb.ha.clusterName=" (:cluster-name test "jepsen-cluster")
+                       " -Darcadedb.ha.quorum=majority"
+                       " -Darcadedb.ha.replicationIncomingHost=0.0.0.0"
+                       " -Darcadedb.server.httpIncomingHost=0.0.0.0")
+        script   (str "#!/bin/sh\nexport JAVA_OPTS=\"" java-opts
+                      "\"\ncd " install-dir "\nexec bin/server.sh")]
+    ;; Write start script and launch as a detached background process
+    (c/exec :sh :-c (str "echo '" script "' > /tmp/start-arcadedb.sh && "
+                         "chmod +x /tmp/start-arcadedb.sh && "
+                         "nohup /tmp/start-arcadedb.sh > /dev/null 2>&1 &"))
     ;; Wait for HTTP API to become ready
     (util/await-fn
       (fn []
         (try
-          (= "204"
-             (c/exec :curl :-s :-o "/dev/null" :-w "%{http_code}"
-                     (str "http://localhost:2480/api/v1/ready")))
+          (c/exec :curl :-sf "http://localhost:2480/api/v1/ready")
+          true
           (catch Exception _ false)))
       {:retry-interval 2000
        :log-interval   10000
        :log-message    (str "Waiting for ArcadeDB to start on " node)
-       :timeout        60000})))
+       :timeout        120000})))
 
 (defn stop!
-  "Stops the ArcadeDB server."
+  "Stops the ArcadeDB server. Safe to call when no process is running."
   [node]
   (info "Stopping ArcadeDB on" node)
-  (c/su
-    (cu/grepkill! "arcadedb")))
+  (try (c/exec :pkill :-f "arcadedb")
+       (catch Exception _)))
 
 (defn nuke!
   "Kills the server and wipes all data."
   [node]
   (info "Nuking ArcadeDB on" node)
-  (c/su
-    (cu/grepkill! "arcadedb")
-    (c/exec :rm :-rf data-dir)
-    (c/exec :rm :-rf (str install-dir "/log"))
-    (c/exec :rm :-rf (str install-dir "/raft-storage*"))))
+  (try (c/exec :pkill :-9 :-f "arcadedb")
+       (catch Exception _))
+  (c/exec :rm :-rf data-dir (str install-dir "/log"))
+  ;; Shell glob for raft-storage directories
+  (c/exec :sh :-c (str "rm -rf " install-dir "/raft-storage*")))
 
 (defn arcadedb
   "Returns a Jepsen DB implementation for ArcadeDB."
@@ -125,11 +123,15 @@
       (start! test node))
 
     (kill! [_ test node]
-      (c/su (cu/grepkill! :9 "arcadedb")))
+      (info "Killing ArcadeDB on" node)
+      (try (c/exec :pkill :-9 :-f "arcadedb")
+           (catch Exception _)))
 
     db/Pause
     (pause! [_ test node]
-      (c/su (cu/grepkill! :stop "arcadedb")))
+      (info "Pausing ArcadeDB on" node)
+      (c/exec :pkill :-STOP :-f "arcadedb"))
 
     (resume! [_ test node]
-      (c/su (cu/grepkill! :cont "arcadedb")))))
+      (info "Resuming ArcadeDB on" node)
+      (c/exec :pkill :-CONT :-f "arcadedb"))))

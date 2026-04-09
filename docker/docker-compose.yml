@@ -1,0 +1,87 @@
+services:
+  control:
+    build:
+      context: .
+      dockerfile: Dockerfile.control
+    container_name: jepsen-control
+    hostname: control
+    volumes:
+      - ../:/jepsen
+      - ssh-keys:/root/.ssh
+    networks:
+      - jepsen
+    depends_on:
+      - n1
+      - n2
+      - n3
+      - n4
+      - n5
+    stdin_open: true
+    tty: true
+
+  n1:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: jepsen-n1
+    hostname: n1
+    volumes:
+      - ssh-keys:/root/.ssh-control:ro
+    networks:
+      - jepsen
+    privileged: true
+
+  n2:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: jepsen-n2
+    hostname: n2
+    volumes:
+      - ssh-keys:/root/.ssh-control:ro
+    networks:
+      - jepsen
+    privileged: true
+
+  n3:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: jepsen-n3
+    hostname: n3
+    volumes:
+      - ssh-keys:/root/.ssh-control:ro
+    networks:
+      - jepsen
+    privileged: true
+
+  n4:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: jepsen-n4
+    hostname: n4
+    volumes:
+      - ssh-keys:/root/.ssh-control:ro
+    networks:
+      - jepsen
+    privileged: true
+
+  n5:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: jepsen-n5
+    hostname: n5
+    volumes:
+      - ssh-keys:/root/.ssh-control:ro
+    networks:
+      - jepsen
+    privileged: true
+
+volumes:
+  ssh-keys:
+
+networks:
+  jepsen:
+    driver: bridge

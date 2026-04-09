@@ -9,8 +9,8 @@
             [jepsen [checker :as checker]
                     [cli :as cli]
                     [generator :as gen]
-                    [tests :as tests]]
-            [jepsen.os.debian :as debian]))
+                    [os :as os]
+                    [tests :as tests]]))
 
 (def root-password "playwithdata")
 
@@ -39,7 +39,7 @@
            opts
            {:name          (str "arcadedb-" (name workload-name)
                                "-" (name (:nemesis opts :all)))
-            :os            debian/os
+            :os            os/noop
             :db            db
             :client        (:client workload)
             :nemesis       (:nemesis nem)
