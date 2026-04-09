@@ -34,13 +34,14 @@
         workload      ((workloads workload-name) opts)
         faults        (get fault-sets (:nemesis opts :all) #{:partition})
         nem           (arcn/full-nemesis {:faults faults})
-        db            (db/arcadedb (:version opts "25.3.1"))]
+        local-dist?   (:local-dist opts false)]
     (merge tests/noop-test
            opts
            {:name          (str "arcadedb-" (name workload-name)
-                               "-" (name (:nemesis opts :all)))
+                               "-" (name (:nemesis opts :all))
+                               (when local-dist? "-local"))
             :os            os/noop
-            :db            db
+            :db            (db/arcadedb)
             :client        (:client workload)
             :nemesis       (:nemesis nem)
             :checker       (checker/compose
@@ -49,20 +50,26 @@
                               :stats    (checker/stats)
                               :clock    (checker/clock-plot)
                               :ex       (checker/unhandled-exceptions)})
-            :generator     (->> (:generator workload)
-                                (gen/stagger (/ (:rate opts 10)))
-                                (gen/nemesis (:generator nem))
-                                (gen/time-limit (:time-limit opts 60)))
+            :generator     (let [client-gen (->> (:generator workload)
+                                               (gen/stagger (/ (:rate opts 10))))]
+                            (->> (if (empty? faults)
+                                   client-gen
+                                   (gen/nemesis client-gen (:generator nem)))
+                                 (gen/time-limit (:time-limit opts 60))))
             :root-password root-password
             :cluster-name  "jepsen-cluster"
+            :local-dist    local-dist?
             :setup-lock    (Object.)
             :setup-done    (atom false)
             :pure-generators true})))
 
 (def cli-opts
   "Additional CLI options for arcadedb-jepsen."
-  [[nil "--version VERSION" "ArcadeDB version to install"
+  [[nil "--version VERSION" "ArcadeDB version to install (ignored with --local-dist)"
     :default "25.3.1"]
+
+   [nil "--local-dist" "Use local ArcadeDB distribution from dist/ instead of downloading"
+    :default false]
 
    ["-w" "--workload WORKLOAD" "Workload: bank, register"
     :default :bank

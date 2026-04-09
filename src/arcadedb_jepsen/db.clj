@@ -12,8 +12,8 @@
 (def install-dir "/opt/arcadedb")
 (def data-dir "/opt/arcadedb/databases")
 (def log-file "/opt/arcadedb/log/arcadedb.log")
-(def pid-file "/opt/arcadedb/bin/arcadedb.pid")
 (def config-dir "/opt/arcadedb/config")
+(def local-dist-path "/jepsen/dist/arcadedb.tar.gz")
 
 (defn node-url
   "Returns the download URL for the ArcadeDB distribution."
@@ -27,31 +27,43 @@
   [test]
   (str/join "," (map #(str (name %) ":2424") (:nodes test))))
 
-(defn install!
-  "Downloads and installs ArcadeDB on a node.
-   Java and curl are expected to be pre-installed (see docker/Dockerfile.node)."
+(defn install-from-url!
+  "Downloads and installs ArcadeDB from a URL."
   [version]
-  (info "Installing ArcadeDB" version)
+  (info "Installing ArcadeDB" version "from GitHub release")
   (cu/install-archive! (node-url version) install-dir))
+
+(defn install-from-local!
+  "Installs ArcadeDB from a local tarball mounted in the container."
+  []
+  (info "Installing ArcadeDB from local distribution" local-dist-path)
+  (c/exec :sh :-c (str "rm -rf " install-dir " && mkdir -p " install-dir
+                        " && tar xzf " local-dist-path " -C " install-dir " --strip-components=1")))
+
+(defn install!
+  "Installs ArcadeDB. Uses local distribution if available, otherwise downloads."
+  [test]
+  (if (:local-dist test)
+    (install-from-local!)
+    (install-from-url! (:version test "25.3.1"))))
 
 (defn configure!
   "Writes ArcadeDB server configuration for HA mode."
   [test node]
   (info "Configuring ArcadeDB HA on" node)
   (c/exec :mkdir :-p config-dir)
-    ;; Write arcadedb-server.properties
-    (c/exec :echo
-            (str/join "\n"
-              [(str "arcadedb.server.name=" (name node))
-               (str "arcadedb.server.rootPassword=" (:root-password test))
-               "arcadedb.server.defaultDatabases=jepsen[root]"
-               "arcadedb.ha.enabled=true"
-               (str "arcadedb.ha.serverList=" (server-list test))
-               (str "arcadedb.ha.clusterName=" (:cluster-name test "jepsen-cluster"))
-               "arcadedb.ha.quorum=majority"
-               "arcadedb.ha.replicationIncomingHost=0.0.0.0"
-               "arcadedb.server.httpIncomingHost=0.0.0.0"])
-            :> (str config-dir "/arcadedb-server.properties")))
+  (c/exec :echo
+          (str/join "\n"
+            [(str "arcadedb.server.name=" (name node))
+             (str "arcadedb.server.rootPassword=" (:root-password test))
+             "arcadedb.server.defaultDatabases=jepsen[root]"
+             "arcadedb.ha.enabled=true"
+             (str "arcadedb.ha.serverList=" (server-list test))
+             (str "arcadedb.ha.clusterName=" (:cluster-name test "jepsen-cluster"))
+             "arcadedb.ha.quorum=majority"
+             "arcadedb.ha.replicationIncomingHost=0.0.0.0"
+             "arcadedb.server.httpIncomingHost=0.0.0.0"])
+          :> (str config-dir "/arcadedb-server.properties")))
 
 (defn start!
   "Starts the ArcadeDB server."
@@ -99,18 +111,16 @@
   "Kills the server and wipes all data."
   [node]
   (info "Nuking ArcadeDB on" node)
-  ;; Kill all ArcadeDB Java processes and wait for them to die.
-  ;; Use pgrep/grep to avoid matching the shell command itself.
   (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -9 2>/dev/null; sleep 1; true")
   (c/exec :sh :-c (str "rm -rf " data-dir " " install-dir "/log " install-dir "/raft-storage*")))
 
 (defn arcadedb
   "Returns a Jepsen DB implementation for ArcadeDB."
-  [version]
+  []
   (reify
     db/DB
     (setup! [_ test node]
-      (install! version)
+      (install! test)
       (configure! test node)
       (start! test node))
 

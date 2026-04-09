@@ -27,6 +27,7 @@ services:
     hostname: n1
     volumes:
       - ssh-keys:/root/.ssh-control:ro
+      - ../dist:/jepsen/dist:ro
     networks:
       - jepsen
     privileged: true
@@ -39,6 +40,7 @@ services:
     hostname: n2
     volumes:
       - ssh-keys:/root/.ssh-control:ro
+      - ../dist:/jepsen/dist:ro
     networks:
       - jepsen
     privileged: true
@@ -51,6 +53,7 @@ services:
     hostname: n3
     volumes:
       - ssh-keys:/root/.ssh-control:ro
+      - ../dist:/jepsen/dist:ro
     networks:
       - jepsen
     privileged: true
@@ -63,6 +66,7 @@ services:
     hostname: n4
     volumes:
       - ssh-keys:/root/.ssh-control:ro
+      - ../dist:/jepsen/dist:ro
     networks:
       - jepsen
     privileged: true
@@ -75,6 +79,7 @@ services:
     hostname: n5
     volumes:
       - ssh-keys:/root/.ssh-control:ro
+      - ../dist:/jepsen/dist:ro
     networks:
       - jepsen
     privileged: true

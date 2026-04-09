@@ -73,13 +73,25 @@
 
   (setup! [this test]
     ;; Only one node needs to create schema/data; others will see it via replication.
-    ;; Use locking on the test atom to avoid races.
+    ;; Retry with backoff: the HA cluster needs time for leader election.
     (locking (:setup-lock test)
       (when (compare-and-set! (:setup-done test) false true)
         (info "Setting up bank schema and accounts on" node)
-        (create-schema! conn)
-        (Thread/sleep 2000)  ;; Wait for schema to replicate
-        (populate-accounts! conn))))
+        (let [deadline (+ (System/currentTimeMillis) 60000)]
+          (loop [attempt 1]
+            (let [result (try
+                           (create-schema! conn)
+                           (Thread/sleep 3000) ;; Wait for schema to replicate
+                           (populate-accounts! conn)
+                           :ok
+                           (catch Exception e
+                             (if (< (System/currentTimeMillis) deadline)
+                               (do (warn "Setup attempt" attempt "failed:" (.getMessage e) "- retrying...")
+                                   (Thread/sleep (* 2000 (min attempt 5)))
+                                   :retry)
+                               (throw e))))]
+              (when (= result :retry)
+                (recur (inc attempt)))))))))
 
   (invoke! [this test op]
     (try
