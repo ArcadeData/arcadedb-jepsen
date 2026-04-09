@@ -22,6 +22,18 @@ Tests that the total balance across 5 accounts (initially 1000 each = 5000 total
 | pause | :white_check_mark: PASS |
 | all | :white_check_mark: PASS |
 
+### Set Workload (replication completeness)
+
+Tests that no acknowledged writes are lost during replication. Inserts unique elements, reads all, verifies every successfully added element appears in subsequent reads.
+
+| Nemesis | Result |
+|---------|--------|
+| none | :white_check_mark: PASS |
+| partition | :white_check_mark: PASS |
+| kill | :white_check_mark: PASS |
+| pause | :white_check_mark: PASS |
+| all | :white_check_mark: PASS |
+
 ### Register Workload (linearizability via Knossos)
 
 Tests single-key read/write/CAS operations routed to the leader, checked by the Knossos linearizability checker for strict linearizability.
@@ -34,7 +46,7 @@ Tests single-key read/write/CAS operations routed to the leader, checked by the 
 | pause | :white_check_mark: PASS |
 | all | :white_check_mark: PASS |
 
-Each test takes ~2-3 minutes (cluster startup + 60s test + Knossos analysis + teardown). The full matrix of 10 tests takes ~25 minutes with fresh cluster restarts between each test.
+Each test takes ~2-3 minutes (cluster startup + 60s test + analysis + teardown). The full matrix of 15 tests takes ~35 minutes with fresh cluster restarts between each test.
 
 ### Read Consistency Levels
 
@@ -53,6 +65,7 @@ In **linearizable mode** (recommended for Jepsen testing), the leader verifies i
 | Workload | What it tests | Checker |
 |----------|---------------|---------|
 | **bank** | ACID transactions: transfers between 5 accounts, checks total balance conservation (5000) | Custom conservation checker |
+| **set** | Replication completeness: inserts unique elements, verifies none are lost | Custom set checker |
 | **register** | Linearizability: single-key read/write/CAS, all operations routed to the leader | Knossos linearizability checker |
 
 ## Nemesis Faults

@@ -5,6 +5,7 @@
             [arcadedb-jepsen.db :as db]
             [arcadedb-jepsen.nemesis :as arcn]
             [arcadedb-jepsen.register :as register]
+            [arcadedb-jepsen.set :as set-workload]
             [clojure.tools.logging :refer [info]]
             [jepsen [checker :as checker]
                     [cli :as cli]
@@ -17,7 +18,8 @@
 (def workloads
   "Map of workload names to constructors."
   {:bank     bank/workload
-   :register register/workload})
+   :register register/workload
+   :set      set-workload/workload})
 
 (def fault-sets
   "Named sets of faults for the nemesis."
@@ -63,6 +65,7 @@
             :read-consistency  (:read-consistency opts :read_your_writes)
             :setup-lock    (Object.)
             :setup-done    (atom false)
+            :set-counter   (atom 0)
             :pure-generators true})))
 
 (def cli-opts
@@ -73,7 +76,7 @@
    [nil "--local-dist" "Use local ArcadeDB distribution from dist/ instead of downloading"
     :default false]
 
-   ["-w" "--workload WORKLOAD" "Workload: bank, register"
+   ["-w" "--workload WORKLOAD" "Workload: bank, register, set"
     :default :bank
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
