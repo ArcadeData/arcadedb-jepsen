@@ -51,10 +51,11 @@
                               :clock    (checker/clock-plot)
                               :ex       (checker/unhandled-exceptions)})
             :generator     (let [client-gen (->> (:generator workload)
-                                               (gen/stagger (/ (:rate opts 10))))]
-                            (->> (if (empty? faults)
-                                   client-gen
-                                   (gen/nemesis client-gen (:generator nem)))
+                                               (gen/stagger (/ (:rate opts 10))))
+                                  nem-gen   (:generator nem)]
+                            (->> (if nem-gen
+                                   (gen/nemesis client-gen nem-gen)
+                                   client-gen)
                                  (gen/time-limit (:time-limit opts 60))))
             :root-password root-password
             :cluster-name  "jepsen-cluster"

@@ -2,62 +2,55 @@
   "Nemesis configurations for ArcadeDB Jepsen tests.
    Provides standard fault injection: network partitions, process kills,
    process pauses, and clock skew."
-  (:require [jepsen [generator :as gen]
+  (:require [jepsen [control :as c]
+                    [generator :as gen]
                     [nemesis :as nemesis]]))
 
-(defn partition-nemesis
-  "A nemesis that creates random network partitions."
-  []
-  (nemesis/partition-random-halves))
-
-(defn kill-nemesis
-  "A nemesis that kills and restarts ArcadeDB processes."
-  []
-  (nemesis/node-start-stopper
-    rand-nth
-    (fn [test node] ((:kill! (:db test)) (:db test) test node))
-    (fn [test node] ((:start! (:db test)) (:db test) test node))))
-
-(defn pause-nemesis
-  "A nemesis that pauses and resumes ArcadeDB processes (SIGSTOP/SIGCONT)."
-  []
-  (nemesis/node-start-stopper
-    rand-nth
-    (fn [test node] ((:pause! (:db test)) (:db test) test node))
-    (fn [test node] ((:resume! (:db test)) (:db test) test node))))
-
 (defn combined-nemesis
-  "A nemesis that combines partitions and process kills."
+  "A nemesis that combines partitions, process kills, and pauses.
+   Uses f-map to translate external :f values to the :start/:stop
+   that sub-nemeses expect."
   []
   (nemesis/compose
-    {#{:partition-start :partition-stop} (partition-nemesis)
-     #{:kill           :revive}          (kill-nemesis)
-     #{:pause          :resume}          (pause-nemesis)}))
+    {{:partition-start :start
+      :partition-stop  :stop}  (nemesis/partition-random-halves)
+     {:kill  :start
+      :revive :stop}           (nemesis/node-start-stopper
+                                 rand-nth
+                                 (fn [test node]
+                                   (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -9 2>/dev/null; true"))
+                                 (fn [test node]
+                                   (let [db (:db test)]
+                                     (.start! db test node))))
+     {:pause  :start
+      :resume :stop}           (nemesis/node-start-stopper
+                                 rand-nth
+                                 (fn [test node]
+                                   (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -STOP 2>/dev/null; true"))
+                                 (fn [test node]
+                                   (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -CONT 2>/dev/null; true")))}))
 
 (defn nemesis-generator
-  "Returns a generator that interleaves nemesis faults with a quiet period.
-   Cycles through: wait -> fault -> wait -> heal."
+  "Returns a generator that cycles through fault injection phases."
   [opts]
   (let [faults (:faults opts #{:partition :kill :pause})
         ops    (cond-> []
                  (:partition faults)
-                 (conj {:type :info :f :partition-start}
-                       {:type :info :f :partition-stop})
+                 (into [{:type :info :f :partition-start}
+                        {:type :info :f :partition-stop}])
 
                  (:kill faults)
-                 (conj {:type :info :f :kill}
-                       {:type :info :f :revive})
+                 (into [{:type :info :f :kill}
+                        {:type :info :f :revive}])
 
                  (:pause faults)
-                 (conj {:type :info :f :pause}
-                       {:type :info :f :resume}))]
-    (if (empty? ops)
-      ;; No faults configured - return a no-op generator that just sleeps
-      (gen/sleep 1000000)
+                 (into [{:type :info :f :pause}
+                        {:type :info :f :resume}]))]
+    (when (seq ops)
       (gen/cycle
-        (fn [] (->> (mapcat (fn [[start stop]]
-                              [(gen/sleep 5) start (gen/sleep 10) stop])
-                            (partition 2 ops))
+        (fn [] (->> (partition 2 ops)
+                    (mapcat (fn [[start stop]]
+                              [(gen/sleep 5) start (gen/sleep 10) stop]))
                     (into [])))))))
 
 (defn full-nemesis
