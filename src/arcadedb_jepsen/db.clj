@@ -77,7 +77,8 @@
                        " -Darcadedb.ha.clusterName=" (:cluster-name test "jepsen-cluster")
                        " -Darcadedb.ha.quorum=majority"
                        " -Darcadedb.ha.replicationIncomingHost=0.0.0.0"
-                       " -Darcadedb.server.httpIncomingHost=0.0.0.0")
+                       " -Darcadedb.server.httpIncomingHost=0.0.0.0"
+                       " -Darcadedb.ha.readConsistency=" (name (:read-consistency test :read_your_writes)))
         script   (str "#!/bin/sh\nexport JAVA_OPTS=\"" java-opts
                       "\"\ncd " install-dir "\nexec bin/server.sh")]
     ;; Ensure no leftover process. [A] trick prevents grep from matching itself.

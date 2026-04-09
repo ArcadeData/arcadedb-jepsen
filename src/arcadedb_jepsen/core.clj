@@ -57,9 +57,10 @@
                                    (gen/any client-gen (gen/nemesis nem-gen))
                                    client-gen)
                                  (gen/time-limit (:time-limit opts 60))))
-            :root-password root-password
-            :cluster-name  "jepsen-cluster"
-            :local-dist    local-dist?
+            :root-password     root-password
+            :cluster-name      "jepsen-cluster"
+            :local-dist        local-dist?
+            :read-consistency  (:read-consistency opts :read_your_writes)
             :setup-lock    (Object.)
             :setup-done    (atom false)
             :pure-generators true})))
@@ -81,6 +82,12 @@
     :default :all
     :parse-fn keyword
     :validate [fault-sets (cli/one-of fault-sets)]]
+
+   [nil "--read-consistency LEVEL" "Read consistency: eventual, read_your_writes, linearizable"
+    :default :read_your_writes
+    :parse-fn keyword
+    :validate [#{:eventual :read_your_writes :linearizable}
+               "Must be eventual, read_your_writes, or linearizable"]]
 
    [nil "--rate RATE" "Operations per second"
     :default 10

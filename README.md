@@ -20,31 +20,46 @@ Tests that the total balance across 5 accounts (initially 1000 each = 5000 total
 | pause | PASS | SIGSTOP/SIGCONT random nodes - balance conserved |
 | all | PASS | All faults combined - balance conserved |
 
-### Register Workload (linearizability via Knossos)
+### Register Workload - Default Mode (`readConsistency=read_your_writes`)
 
-Tests single-key read/write/CAS operations routed to the leader, checked by the Knossos linearizability checker.
+Tests single-key read/write/CAS operations routed to the leader, checked by the Knossos linearizability checker. Default ArcadeDB config: reads go directly to the local database for maximum performance.
 
 | Nemesis | Result | Details |
 |---------|--------|---------|
 | none | PASS | Baseline - linearizable |
-| partition | UNKNOWN | No violation found; Knossos cannot prove linearizability due to indeterminate operations during partitions |
-| kill | UNKNOWN | Knossos runs out of memory exploring the search space created by many indeterminate operations from killed nodes |
+| partition | UNKNOWN | No violation found; Knossos can't prove it due to indeterminate ops during partitions (checker limitation) |
+| kill | UNKNOWN | Knossos runs out of memory with many indeterminate ops from killed nodes (checker limitation) |
 | pause | FAIL | Stale read from a deposed leader after SIGCONT (see analysis below) |
 | all | FAIL | Includes pause - same root cause |
+
+### Register Workload - Linearizable Mode (`readConsistency=linearizable`)
+
+Same test but with `--read-consistency linearizable`, which enables the Raft read index protocol (Section 6.4 of the Raft paper). Leader verifies its lease before serving reads.
+
+| Nemesis | Result | Details |
+|---------|--------|---------|
+| none | PASS | Linearizable |
+| partition | PASS | Linearizable under network partitions |
+| pause | PASS | Linearizable under SIGSTOP/SIGCONT - deposed leader correctly rejects reads |
+| all | UNKNOWN | No violation found; Knossos can't prove it due to indeterminate ops (checker limitation) |
 
 ### Analysis
 
 **ACID transactions are solid.** The bank test passes under all fault types. Money is never created or destroyed, even under network partitions, process crashes, and process pauses combined.
 
-**Linearizability has one design limitation with SIGSTOP/SIGCONT (process pause).** When a leader is frozen with SIGSTOP, other nodes elect a new leader and continue processing writes. When the old leader is resumed with SIGCONT, there is a brief window where it still believes it is the leader (Ratis hasn't detected the lease expiry yet) and serves stale reads from its local database.
+**Linearizability is configurable.** ArcadeDB supports three read consistency levels via `arcadedb.ha.readConsistency`:
 
-This happens because ArcadeDB reads bypass the Ratis consensus protocol - they go directly to the local database for performance. The `waitForLocalApply()` barrier (which prevents stale reads during normal leadership transitions from partitions/kills) cannot help here because the deposed leader's own commit index is stale.
+| Level | Performance | Consistency | Use case |
+|-------|-------------|-------------|----------|
+| `eventual` | Fastest | May read stale data on followers | Analytics, dashboards |
+| `read_your_writes` (default) | Fast | Leader reads from local DB; followers wait for client's last write | Most OLTP workloads |
+| `linearizable` | +1 RTT when lease expired | Full linearizability even under process pauses | Financial transactions, coordination |
 
-**The SIGSTOP scenario maps to:** VM suspend/resume, extreme GC pauses (minutes), or `kill -STOP`/`kill -CONT`. It does not occur during normal network partitions or process crashes.
+In **default mode** (`read_your_writes`), the leader reads directly from its local database. This is fast but has a corner case: after SIGSTOP/SIGCONT (VM suspend, extreme GC pause), a deposed leader may briefly serve stale reads before Ratis detects the lease expiry.
 
-**The `UNKNOWN` results for partition and kill** are not failures - they mean Knossos found no violation but couldn't exhaustively prove linearizability due to the large number of indeterminate (`:info`) operations. This is a checker limitation, not a database issue. With fewer concurrent operations or shorter test durations, the checker can complete and returns PASS.
+In **linearizable mode**, the leader verifies it still holds the Raft lease before every read via Ratis's `sendReadOnly()` API. If the lease is valid (common case), this is a local timestamp check with no network round-trip. If the lease expired, Ratis sends heartbeats to a majority (~1 RTT). This eliminates the stale read window completely.
 
-**Fix for full linearizability:** Route leader reads through Ratis's `sendReadOnly()` API, which verifies the leader lease is still valid (or sends a heartbeat round-trip to confirm majority). This adds latency per read but guarantees linearizability even under process pauses. This can be configured via `arcadedb.ha.readConsistency=linearizable`.
+**The `UNKNOWN` results** for partition, kill, and all are not failures - they mean Knossos found no violation but couldn't exhaustively prove linearizability due to the large number of indeterminate (`:info`) operations from unreachable nodes. This is a checker limitation, not a database issue.
 
 ## Workloads
 
@@ -155,6 +170,7 @@ Note: released versions before the `apache-ratis` branch do not have Ratis HA, s
 | `--time-limit` | `60` | Test duration in seconds |
 | `--local-dist` | `false` | Use local build from `dist/` instead of downloading |
 | `--version` | `25.3.1` | ArcadeDB release version (ignored with `--local-dist`) |
+| `--read-consistency` | `read_your_writes` | ArcadeDB server read consistency: `eventual`, `read_your_writes`, `linearizable` |
 | `--rate` | `10` | Operations per second |
 | `--node` | (required) | Node hostname (repeat for each node) |
 | `--username` | (required) | SSH username |
