@@ -40,8 +40,9 @@ Same test but with `--read-consistency linearizable`, which enables the Raft rea
 |---------|--------|---------|
 | none | PASS | Linearizable |
 | partition | PASS | Linearizable under network partitions |
+| kill | PASS | Linearizable under process crashes |
 | pause | PASS | Linearizable under SIGSTOP/SIGCONT - deposed leader correctly rejects reads |
-| all | UNKNOWN | No violation found; Knossos can't prove it due to indeterminate ops (checker limitation) |
+| all | PASS | Linearizable under all faults combined |
 
 ### Analysis
 
