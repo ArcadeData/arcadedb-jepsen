@@ -44,18 +44,18 @@
                     "COMMIT RETRY 10;")))
 
 (defn cas-register!
-  "Compare-and-swap on a register key. Returns true if successful."
+  "Compare-and-swap on a register key. Returns true if successful.
+   Uses a single UPDATE with WHERE val = old_val - the count of modified rows
+   tells us if the CAS succeeded."
   [client k old-val new-val]
-  (let [result (ac/command! client "sqlscript"
-                            (str "BEGIN ISOLATION REPEATABLE_READ;"
-                                 "LET $r = SELECT FROM Register WHERE key = '" k "' AND val = " old-val ";"
-                                 "IF ($r.size() > 0) {"
-                                 "  UPDATE Register SET val = " new-val " WHERE key = '" k "' AND val = " old-val ";"
-                                 "}"
-                                 "COMMIT RETRY 3;"))
-        ;; Check if the update affected a row
-        updated (some-> result :result first :count)]
-    (and updated (pos? updated))))
+  (let [result (ac/command! client "sql"
+                            (str "UPDATE Register SET val = " new-val
+                                 " WHERE key = '" k "' AND val = " old-val))
+        ;; ArcadeDB returns {\"count\": N} for UPDATE commands
+        cnt (or (get-in result [:result 0 :count])
+                (get-in result [:result :count])
+                0)]
+    (pos? cnt)))
 
 (defn- find-leader-conn
   "Discovers the current leader and returns a client connected to it, or throws."
