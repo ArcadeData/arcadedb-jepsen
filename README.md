@@ -16,11 +16,11 @@ Tests that the total balance across 5 accounts (initially 1000 each = 5000 total
 
 | Nemesis | Result | ~Duration |
 |---------|--------|-----------|
-| none | PASS | ~2 min |
-| partition | PASS | ~2 min |
-| kill | PASS | ~2 min |
-| pause | PASS | ~2 min |
-| all | PASS | ~2 min |
+| none | :white_check_mark: PASS | ~2 min |
+| partition | :white_check_mark: PASS | ~2 min |
+| kill | :white_check_mark: PASS | ~2 min |
+| pause | :white_check_mark: PASS | ~2 min |
+| all | :white_check_mark: PASS | ~2 min |
 
 ### Register Workload (linearizability via Knossos)
 
@@ -28,11 +28,11 @@ Tests single-key read/write/CAS operations routed to the leader, checked by the 
 
 | Nemesis | Result | ~Duration |
 |---------|--------|-----------|
-| none | PASS | ~2 min |
-| partition | PASS | ~3 min |
-| kill | PASS | ~3 min |
-| pause | PASS | ~3 min |
-| all | PASS | ~4 min |
+| none | :white_check_mark: PASS | ~2 min |
+| partition | :white_check_mark: PASS | ~3 min |
+| kill | :white_check_mark: PASS | ~3 min |
+| pause | :white_check_mark: PASS | ~3 min |
+| all | :white_check_mark: PASS | ~4 min |
 
 Durations include cluster startup (~30s), the test run (60s), Knossos analysis (10-60s), and teardown.
 
