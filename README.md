@@ -14,27 +14,27 @@ Each test uses a fresh Docker cluster to eliminate cross-test state contaminatio
 
 Tests that the total balance across 5 accounts (initially 1000 each = 5000 total) is always conserved, even under concurrent transfers and faults.
 
-| Nemesis | Result | ~Duration |
-|---------|--------|-----------|
-| none | :white_check_mark: PASS | ~2 min |
-| partition | :white_check_mark: PASS | ~2 min |
-| kill | :white_check_mark: PASS | ~2 min |
-| pause | :white_check_mark: PASS | ~2 min |
-| all | :white_check_mark: PASS | ~2 min |
+| Nemesis | Result |
+|---------|--------|
+| none | :white_check_mark: PASS |
+| partition | :white_check_mark: PASS |
+| kill | :white_check_mark: PASS |
+| pause | :white_check_mark: PASS |
+| all | :white_check_mark: PASS |
 
 ### Register Workload (linearizability via Knossos)
 
 Tests single-key read/write/CAS operations routed to the leader, checked by the Knossos linearizability checker for strict linearizability.
 
-| Nemesis | Result | ~Duration |
-|---------|--------|-----------|
-| none | :white_check_mark: PASS | ~2 min |
-| partition | :white_check_mark: PASS | ~3 min |
-| kill | :white_check_mark: PASS | ~3 min |
-| pause | :white_check_mark: PASS | ~3 min |
-| all | :white_check_mark: PASS | ~4 min |
+| Nemesis | Result |
+|---------|--------|
+| none | :white_check_mark: PASS |
+| partition | :white_check_mark: PASS |
+| kill | :white_check_mark: PASS |
+| pause | :white_check_mark: PASS |
+| all | :white_check_mark: PASS |
 
-Durations include cluster startup (~30s), the test run (60s), Knossos analysis (10-60s), and teardown.
+Each test takes ~2-3 minutes (cluster startup + 60s test + Knossos analysis + teardown). The full matrix of 10 tests takes ~25 minutes with fresh cluster restarts between each test.
 
 ### Read Consistency Levels
 
