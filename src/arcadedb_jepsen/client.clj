@@ -2,9 +2,9 @@
   "HTTP client for ArcadeDB REST API."
   (:require [cheshire.core :as json]
             [clojure.tools.logging :refer [info warn]])
-  (:import [java.net URI HttpURLConnection]
+  (:import [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
-                          HttpResponse$BodyHandlers]
+                          HttpResponse HttpResponse$BodyHandlers]
            [java.time Duration]
            [java.util Base64]))
 
@@ -43,10 +43,10 @@
                     (.POST (HttpRequest$BodyPublishers/ofString (json/generate-string body)))
                     (.timeout (Duration/ofSeconds 10))
                     (.build))
-        response (.send (:http-client client) request
-                        (HttpResponse$BodyHandlers/ofString))
+        ^HttpResponse response (.send ^HttpClient (:http-client client)
+                                      request (HttpResponse$BodyHandlers/ofString))
         status   (.statusCode response)
-        body-str (.body response)]
+        body-str (str (.body response))]
     (when (>= status 400)
       (throw (ex-info (str "ArcadeDB HTTP " status ": " body-str)
                       {:status status :body body-str})))
@@ -56,17 +56,17 @@
   "Executes a SQL query (read-only) on ArcadeDB."
   [client command]
   (let [url  (str (:base-url client) "/api/v1/query/" (:database client)
-                  "/sql/" (java.net.URLEncoder/encode command "UTF-8"))
+                  "/sql/" (java.net.URLEncoder/encode ^String command "UTF-8"))
         request (-> (HttpRequest/newBuilder)
                     (.uri (URI/create url))
                     (.header "Authorization" (:auth client))
                     (.GET)
                     (.timeout (Duration/ofSeconds 10))
                     (.build))
-        response (.send (:http-client client) request
-                        (HttpResponse$BodyHandlers/ofString))
+        ^HttpResponse response (.send ^HttpClient (:http-client client)
+                                      request (HttpResponse$BodyHandlers/ofString))
         status   (.statusCode response)
-        body-str (.body response)]
+        body-str (str (.body response))]
     (when (>= status 400)
       (throw (ex-info (str "ArcadeDB HTTP " status ": " body-str)
                       {:status status :body body-str})))
