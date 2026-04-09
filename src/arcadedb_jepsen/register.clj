@@ -57,6 +57,12 @@
         updated (some-> result :result first :count)]
     (and updated (pos? updated))))
 
+(defn- get-leader-conn
+  "Returns a client connected to the current leader, or throws."
+  [test]
+  (or (ac/leader-client test {:password (:root-password test) :database "jepsen"})
+      (throw (ex-info "No leader found" {}))))
+
 (defrecord RegisterClient [conn node]
   client/Client
   (open! [this test node]
@@ -69,35 +75,57 @@
     (locking (:setup-lock test)
       (when (compare-and-set! (:setup-done test) false true)
         (info "Setting up register schema on" node)
-        (create-schema! conn)
-        (Thread/sleep 2000))))
+        (let [deadline (+ (System/currentTimeMillis) 60000)]
+          (loop [attempt 1]
+            (let [result (try
+                           (let [leader-conn (get-leader-conn test)]
+                             (create-schema! leader-conn)
+                             (Thread/sleep 3000)
+                             :ok)
+                           (catch Exception e
+                             (if (< (System/currentTimeMillis) deadline)
+                               (do (warn "Register setup attempt" attempt "failed:" (.getMessage e))
+                                   (Thread/sleep (* 2000 (min attempt 5)))
+                                   :retry)
+                               (throw e))))]
+              (when (= result :retry)
+                (recur (inc attempt)))))))))
 
   (invoke! [this test op]
     (let [[k v] (:value op)]
       (try
-        (case (:f op)
-          :read
-          (let [val (read-register conn (str "r" k))]
-            (assoc op :type :ok :value (independent/tuple k val)))
+        ;; Always route to the leader for linearizable operations
+        (let [leader-conn (get-leader-conn test)]
+          (case (:f op)
+            :read
+            (let [val (read-register leader-conn (str "r" k))]
+              (assoc op :type :ok :value (independent/tuple k val)))
 
-          :write
-          (do (write-register! conn (str "r" k) v)
-              (assoc op :type :ok))
+            :write
+            (do (write-register! leader-conn (str "r" k) v)
+                (assoc op :type :ok))
 
-          :cas
-          (let [[old-val new-val] v
-                success (cas-register! conn (str "r" k) old-val new-val)]
-            (assoc op :type (if success :ok :fail))))
+            :cas
+            (let [[old-val new-val] v
+                  success (cas-register! leader-conn (str "r" k) old-val new-val)]
+              (assoc op :type (if success :ok :fail)))))
 
         (catch Exception e
           (let [msg (.getMessage e)]
+            ;; Invalidate leader cache on connection errors so we re-discover
+            (when (and msg (or (.contains msg "Connection refused")
+                              (.contains msg "connect timed out")
+                              (.contains msg "ServerIsNotTheLeader")))
+              (ac/invalidate-leader!))
             (cond
               (and msg (or (.contains msg "QuorumNotReached")
                           (.contains msg "quorum")
                           (.contains msg "timeout")
                           (.contains msg "Timeout")
                           (.contains msg "Connection refused")
-                          (.contains msg "connect timed out")))
+                          (.contains msg "connect timed out")
+                          (.contains msg "No leader found")
+                          (.contains msg "ServerIsNotTheLeader")))
               (assoc op :type :info :error [:unavailable msg])
 
               (and msg (.contains msg "ConcurrentModification"))

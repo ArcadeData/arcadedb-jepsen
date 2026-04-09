@@ -47,7 +47,6 @@
             :checker       (checker/compose
                              {:workload (:checker workload)
                               :perf     (checker/perf)
-                              :stats    (checker/stats)
                               :clock    (checker/clock-plot)
                               :ex       (checker/unhandled-exceptions)})
             :generator     (let [client-gen (->> (:generator workload)
