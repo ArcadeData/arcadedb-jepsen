@@ -68,11 +68,15 @@
                        " -Darcadedb.server.httpIncomingHost=0.0.0.0")
         script   (str "#!/bin/sh\nexport JAVA_OPTS=\"" java-opts
                       "\"\ncd " install-dir "\nexec bin/server.sh")]
+    ;; Ensure no leftover process. [A] trick prevents grep from matching itself.
+    (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -9 2>/dev/null; sleep 1; true")
     ;; Write start script and launch as a detached background process
     (c/exec :sh :-c (str "echo '" script "' > /tmp/start-arcadedb.sh && "
                          "chmod +x /tmp/start-arcadedb.sh && "
-                         "nohup /tmp/start-arcadedb.sh > /dev/null 2>&1 &"))
+                         "nohup /tmp/start-arcadedb.sh > /dev/null 2>&1 & "
+                         "sleep 3"))
     ;; Wait for HTTP API to become ready
+    (info "Waiting for ArcadeDB HTTP API on" node)
     (util/await-fn
       (fn []
         (try
@@ -95,11 +99,10 @@
   "Kills the server and wipes all data."
   [node]
   (info "Nuking ArcadeDB on" node)
-  (try (c/exec :pkill :-9 :-f "arcadedb")
-       (catch Exception _))
-  (c/exec :rm :-rf data-dir (str install-dir "/log"))
-  ;; Shell glob for raft-storage directories
-  (c/exec :sh :-c (str "rm -rf " install-dir "/raft-storage*")))
+  ;; Kill all ArcadeDB Java processes and wait for them to die.
+  ;; Use pgrep/grep to avoid matching the shell command itself.
+  (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -9 2>/dev/null; sleep 1; true")
+  (c/exec :sh :-c (str "rm -rf " data-dir " " install-dir "/log " install-dir "/raft-storage*")))
 
 (defn arcadedb
   "Returns a Jepsen DB implementation for ArcadeDB."
@@ -124,8 +127,7 @@
 
     (kill! [_ test node]
       (info "Killing ArcadeDB on" node)
-      (try (c/exec :pkill :-9 :-f "arcadedb")
-           (catch Exception _)))
+      (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -9 2>/dev/null; true"))
 
     db/Pause
     (pause! [_ test node]

@@ -51,11 +51,14 @@
                  (:pause faults)
                  (conj {:type :info :f :pause}
                        {:type :info :f :resume}))]
-    (gen/cycle
-      (fn [] (->> (mapcat (fn [[start stop]]
-                            [(gen/sleep 5) start (gen/sleep 10) stop])
-                          (partition 2 ops))
-                  (into []))))))
+    (if (empty? ops)
+      ;; No faults configured - return a no-op generator that just sleeps
+      (gen/sleep 1000000)
+      (gen/cycle
+        (fn [] (->> (mapcat (fn [[start stop]]
+                              [(gen/sleep 5) start (gen/sleep 10) stop])
+                            (partition 2 ops))
+                    (into [])))))))
 
 (defn full-nemesis
   "Returns a nemesis + generator pair for the given options."
