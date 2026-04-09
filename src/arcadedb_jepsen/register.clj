@@ -112,11 +112,8 @@
 
         (catch Exception e
           (let [msg (.getMessage e)]
-            ;; Invalidate leader cache on connection errors so we re-discover
-            (when (and msg (or (.contains msg "Connection refused")
-                              (.contains msg "connect timed out")
-                              (.contains msg "ServerIsNotTheLeader")))
-              (ac/invalidate-leader!))
+            ;; Invalidate leader cache on any error so we re-discover
+            (ac/invalidate-leader!)
             (cond
               (and msg (or (.contains msg "QuorumNotReached")
                           (.contains msg "quorum")

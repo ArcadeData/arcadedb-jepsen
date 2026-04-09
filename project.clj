@@ -8,7 +8,7 @@
                  [cheshire "5.13.0"]]
   :jvm-opts ["-Djava.awt.headless=true"
              "-server"
-             "-Xmx4g"]
+             "-Xmx8g"]
   :main arcadedb-jepsen.core
   :repl-options {:init-ns arcadedb-jepsen.core}
   :profiles {:dev {:dependencies [[org.clojure/tools.namespace "1.5.0"]]}})
