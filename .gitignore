@@ -1,0 +1,10 @@
+target/
+store/
+.lein-*
+.nrepl-port
+*.jar
+*.class
+.cpcache/
+.idea/
+*.iml
+.DS_Store
