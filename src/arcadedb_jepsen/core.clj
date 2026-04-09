@@ -51,10 +51,11 @@
                               :clock    (checker/clock-plot)
                               :ex       (checker/unhandled-exceptions)})
             :generator     (let [client-gen (->> (:generator workload)
-                                               (gen/stagger (/ (:rate opts 10))))
+                                               (gen/stagger (/ (:rate opts 10)))
+                                               (gen/clients))
                                   nem-gen   (:generator nem)]
                             (->> (if nem-gen
-                                   (gen/nemesis client-gen nem-gen)
+                                   (gen/any client-gen (gen/nemesis nem-gen))
                                    client-gen)
                                  (gen/time-limit (:time-limit opts 60))))
             :root-password root-password
