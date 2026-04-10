@@ -34,6 +34,18 @@ Tests that no acknowledged writes are lost during replication. Inserts unique el
 | pause | :white_check_mark: PASS |
 | all | :white_check_mark: PASS |
 
+### Elle Workload (transaction isolation via cycle detection)
+
+Tests transaction isolation using Elle's dependency-graph cycle detection. Executes multi-key read/write transactions and checks for anomalies: G0 (dirty write), G1a/b/c (dirty/intermediate reads), G2 (anti-dependency), and lost updates.
+
+| Nemesis | Result |
+|---------|--------|
+| none | :white_check_mark: PASS |
+| partition | :white_check_mark: PASS |
+| kill | :white_check_mark: PASS |
+| pause | :white_check_mark: PASS |
+| all | :white_check_mark: PASS |
+
 ### Register Workload (linearizability via Knossos)
 
 Tests single-key read/write/CAS operations routed to the leader, checked by the Knossos linearizability checker for strict linearizability.
@@ -46,7 +58,7 @@ Tests single-key read/write/CAS operations routed to the leader, checked by the 
 | pause | :white_check_mark: PASS |
 | all | :white_check_mark: PASS |
 
-Each test takes ~2-3 minutes (cluster startup + 60s test + analysis + teardown). The full matrix of 15 tests takes ~35 minutes with fresh cluster restarts between each test.
+Each test takes ~2-3 minutes (cluster startup + 60s test + analysis + teardown). The full matrix of 20 tests takes ~45 minutes with fresh cluster restarts between each test.
 
 ### Read Consistency Levels
 
@@ -66,6 +78,7 @@ In **linearizable mode** (recommended for Jepsen testing), the leader verifies i
 |----------|---------------|---------|
 | **bank** | ACID transactions: transfers between 5 accounts, checks total balance conservation (5000) | Custom conservation checker |
 | **set** | Replication completeness: inserts unique elements, verifies none are lost | Custom set checker |
+| **elle** | Transaction isolation: multi-key read/write txns, checks for G0/G1/G2/lost-update | Elle cycle-detection checker |
 | **register** | Linearizability: single-key read/write/CAS, all operations routed to the leader | Knossos linearizability checker |
 
 ## Nemesis Faults

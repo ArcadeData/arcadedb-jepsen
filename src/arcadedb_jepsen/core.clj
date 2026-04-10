@@ -6,6 +6,7 @@
             [arcadedb-jepsen.nemesis :as arcn]
             [arcadedb-jepsen.register :as register]
             [arcadedb-jepsen.set :as set-workload]
+            [arcadedb-jepsen.elle :as elle-workload]
             [clojure.tools.logging :refer [info]]
             [jepsen [checker :as checker]
                     [cli :as cli]
@@ -19,7 +20,8 @@
   "Map of workload names to constructors."
   {:bank     bank/workload
    :register register/workload
-   :set      set-workload/workload})
+   :set      set-workload/workload
+   :elle     elle-workload/workload})
 
 (def fault-sets
   "Named sets of faults for the nemesis."
@@ -76,7 +78,7 @@
    [nil "--local-dist" "Use local ArcadeDB distribution from dist/ instead of downloading"
     :default false]
 
-   ["-w" "--workload WORKLOAD" "Workload: bank, register, set"
+   ["-w" "--workload WORKLOAD" "Workload: bank, register, set, elle"
     :default :bank
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
