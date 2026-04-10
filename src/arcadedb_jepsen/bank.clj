@@ -63,13 +63,14 @@
                     "}"
                     "COMMIT RETRY 10;")))
 
-(defrecord BankClient [conn node]
+(defrecord BankClient [conn node leader-conn-atom]
   client/Client
   (open! [this test node]
     (assoc this
            :conn (ac/make-client node {:password (:root-password test)
                                        :database "jepsen"})
-           :node node))
+           :node node
+           :leader-conn-atom (atom nil)))
 
   (setup! [this test]
     ;; Only one node needs to create schema/data; others will see it via replication.
@@ -94,35 +95,41 @@
                 (recur (inc attempt)))))))))
 
   (invoke! [this test op]
-    (try
-      (case (:f op)
-        :read
-        (let [balances (read-balances conn)]
-          (assoc op :type :ok :value balances))
+    (let [leader-conn (or @leader-conn-atom
+                          (let [c (or (ac/leader-client test {:password (:root-password test) :database "jepsen"})
+                                      conn)] ;; fall back to assigned node
+                            (reset! leader-conn-atom c)
+                            c))]
+      (try
+        (case (:f op)
+          :read
+          (let [balances (read-balances leader-conn)]
+            (assoc op :type :ok :value balances))
 
-        :transfer
-        (let [{:keys [from to amount]} (:value op)]
-          (transfer! conn from to amount)
-          (assoc op :type :ok)))
-      (catch Exception e
-        (let [msg (.getMessage e)]
-          (cond
-            ;; Quorum not reached - cluster may be partitioned
-            (and msg (or (.contains msg "QuorumNotReached")
-                        (.contains msg "quorum")
-                        (.contains msg "timeout")
-                        (.contains msg "Timeout")
-                        (.contains msg "Connection refused")
-                        (.contains msg "connect timed out")))
-            (assoc op :type :info :error [:unavailable msg])
+          :transfer
+          (let [{:keys [from to amount]} (:value op)]
+            (transfer! leader-conn from to amount)
+            (assoc op :type :ok)))
+        (catch Exception e
+          (let [msg (or (.getMessage e) "")]
+            (ac/invalidate-leader!)
+            (reset! leader-conn-atom nil)
+            (cond
+              (or (.contains msg "QuorumNotReached")
+                  (.contains msg "quorum")
+                  (.contains msg "timeout")
+                  (.contains msg "Timeout")
+                  (.contains msg "Connection refused")
+                  (.contains msg "connect timed out")
+                  (.contains msg "No leader found")
+                  (.contains msg "ServerIsNotTheLeader"))
+              (assoc op :type :info :error [:unavailable msg])
 
-            ;; MVCC conflict - definite failure
-            (and msg (.contains msg "ConcurrentModification"))
-            (assoc op :type :fail :error [:conflict msg])
+              (.contains msg "ConcurrentModification")
+              (assoc op :type :fail :error [:conflict msg])
 
-            ;; Unknown error
-            :else
-            (assoc op :type :info :error [:unknown msg]))))))
+              :else
+              (assoc op :type :info :error [:unknown msg])))))))
 
   (teardown! [this test])
 
