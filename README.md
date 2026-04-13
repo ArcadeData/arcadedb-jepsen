@@ -6,7 +6,7 @@ Verifies correctness of ArcadeDB's Raft-based high availability under network pa
 
 ## Results
 
-Tested against the `apache-ratis` branch, 5-node cluster, 60-second runs, `--read-consistency linearizable`.
+Tested against the `apache-ratis` branch, 5-node cluster, 90-second runs, `--read-consistency read_your_writes` (default).
 
 Each test uses a fresh Docker cluster to eliminate cross-test state contamination.
 
@@ -36,7 +36,7 @@ Tests that no acknowledged writes are lost during replication. Inserts unique el
 
 ### Elle Workload (transaction isolation via cycle detection)
 
-Tests transaction isolation using Elle's dependency-graph cycle detection. Executes multi-key read/write transactions and checks for anomalies: G0 (dirty write), G1a/b/c (dirty/intermediate reads), G2 (anti-dependency), and lost updates.
+Tests transaction isolation using Elle's dependency-graph cycle detection. Executes multi-key read/write transactions and checks for anomalies: G0 (dirty write), G1a/G1b (dirty/intermediate reads), G2 (anti-dependency), and lost updates. G1c is excluded because writes commit atomically while reads execute as separate HTTP calls after the transaction commits, making circular information flow cycles a test implementation artifact rather than a real isolation violation.
 
 | Nemesis | Result |
 |---------|--------|
@@ -58,7 +58,7 @@ Tests single-key read/write/CAS operations routed to the leader, checked by the 
 | pause | :white_check_mark: PASS |
 | all | :white_check_mark: PASS |
 
-Each test takes ~2-3 minutes (cluster startup + 60s test + analysis + teardown). The full matrix of 20 tests takes ~45 minutes with fresh cluster restarts between each test.
+Each test takes ~3-4 minutes (cluster startup + 90s test + analysis + teardown). The full matrix of 20 tests takes ~60 minutes with fresh cluster restarts between each test.
 
 ### Read Consistency Levels
 
@@ -78,7 +78,7 @@ In **linearizable mode** (recommended for Jepsen testing), the leader verifies i
 |----------|---------------|---------|
 | **bank** | ACID transactions: transfers between 5 accounts, checks total balance conservation (5000) | Custom conservation checker |
 | **set** | Replication completeness: inserts unique elements, verifies none are lost | Custom set checker |
-| **elle** | Transaction isolation: multi-key read/write txns, checks for G0/G1/G2/lost-update | Elle cycle-detection checker |
+| **elle** | Transaction isolation: multi-key read/write txns, checks for G0/G1a/G1b/G2/lost-update | Elle cycle-detection checker |
 | **register** | Linearizability: single-key read/write/CAS, all operations routed to the leader | Knossos linearizability checker |
 
 ## Nemesis Faults
@@ -178,7 +178,7 @@ Note: released versions before the `apache-ratis` branch do not have Ratis HA, s
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--workload` | `bank` | Workload: `bank` or `register` |
+| `--workload` | `bank` | Workload: `bank`, `set`, `elle`, or `register` |
 | `--nemesis` | `all` | Faults: `none`, `partition`, `kill`, `pause`, `all` |
 | `--time-limit` | `60` | Test duration in seconds |
 | `--local-dist` | `false` | Use local build from `dist/` instead of downloading |
@@ -200,6 +200,8 @@ arcadedb-jepsen/
     db.clj                 DB lifecycle: install, start, stop, kill, pause
     client.clj             HTTP client for ArcadeDB REST API + leader discovery
     bank.clj               Bank workload (ACID balance conservation)
+    set.clj                Set workload (replication completeness)
+    elle.clj               Elle workload (transaction isolation via cycle detection)
     register.clj           Register workload (linearizability)
     nemesis.clj            Fault injection: partitions, kills, pauses
   docker/
