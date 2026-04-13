@@ -82,11 +82,15 @@
 
 (defn leader-client
   "Creates an HTTP client connected to the current leader.
-   Always discovers the leader fresh (no caching) for linearizability."
+   Retries with backoff during elections (up to ~10s) before giving up."
   [test opts]
-  (let [leader (find-leader (:nodes test) opts)]
-    (when leader
-      (make-client leader opts))))
+  (loop [attempt 0]
+    (let [leader (find-leader (:nodes test) opts)]
+      (if leader
+        (make-client leader opts)
+        (when (< attempt 4)
+          (Thread/sleep (* 1000 (inc attempt)))
+          (recur (inc attempt)))))))
 
 (defn invalidate-leader!
   "Clears the cached leader so the next call to leader-client re-discovers it."

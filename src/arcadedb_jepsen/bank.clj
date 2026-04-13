@@ -97,7 +97,7 @@
   (invoke! [this test op]
     (let [leader-conn (or @leader-conn-atom
                           (let [c (or (ac/leader-client test {:password (:root-password test) :database "jepsen"})
-                                      conn)] ;; fall back to assigned node
+                                      (throw (ex-info "No leader found" {})))]
                             (reset! leader-conn-atom c)
                             c))]
       (try
