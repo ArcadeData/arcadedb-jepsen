@@ -188,14 +188,17 @@
                             (assoc op :value (if (seq filtered) filtered [[:r 0 nil]]))))))
    :checker   (reify checker/Checker
                 (check [_ test history opts]
-                  ;; Check for serialization anomalies. We use :anomalies to avoid
-                  ;; :internal (requires in-tx read-after-write, can't test via HTTP)
-                  ;; and exclude real-time ordering (G-single-item-realtime) since
-                  ;; our HTTP-based client has inherent network latency between
-                  ;; write-commit and read-start that makes real-time ordering
-                  ;; untestable (the Raft read index is captured at gRPC time,
-                  ;; not HTTP arrival time).
-                  (rw/check (merge {:anomalies         [:G0 :G1a :G1b :G1c :G2
+                  ;; Check for serialization anomalies. We exclude anomalies that
+                  ;; require all reads and writes to be in a single atomic transaction:
+                  ;; - :internal  (in-tx read-after-write) - reads happen after write
+                  ;;              tx commits, not inside it
+                  ;; - :G1c       (circular information flow) - same root cause: writes
+                  ;;              commit first, then reads run as separate HTTP calls,
+                  ;;              so two ops can observe each other's committed writes
+                  ;;              in a cycle that is actually a valid sequential ordering
+                  ;; - G-single-item-realtime: HTTP latency between write-commit and
+                  ;;              read-start makes real-time ordering untestable
+                  (rw/check (merge {:anomalies         [:G0 :G1a :G1b :G2
                                                         :lost-update]
                                     :additional-graphs []}
                                    opts)
