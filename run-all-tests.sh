@@ -1,10 +1,14 @@
 #!/bin/bash
-# Run all 20 Jepsen tests: 4 workloads x 5 nemesis, 90s each
+# Run all 20 Jepsen tests: 4 workloads x 5 nemesis
+# Usage: ./run-all-tests.sh [time-limit]
+#   time-limit: test duration in seconds (default: 90)
+# Note: register/partition always uses 30s to avoid Knossos analysis explosion
 
+TIME_LIMIT="${1:-90}"
 WORKLOADS=(bank set elle register)
 NEMESES=(none partition kill pause all)
 NODES="--node n1 --node n2 --node n3 --node n4 --node n5"
-COMMON="--local-dist --username root --password root --time-limit 90"
+COMMON="--local-dist --username root --password root"
 PASS=0
 FAIL=0
 RESULTS=()
@@ -20,13 +24,23 @@ count=0
 for WORKLOAD in "${WORKLOADS[@]}"; do
   for NEMESIS in "${NEMESES[@]}"; do
     count=$((count + 1))
+
+    # register/partition uses 30s to keep Knossos linearizability
+    # analysis tractable (indeterminate ops during partitions cause
+    # exponential search space explosion)
+    if [ "$WORKLOAD" = "register" ] && [ "$NEMESIS" = "partition" ]; then
+      TL=30
+    else
+      TL=$TIME_LIMIT
+    fi
+
     echo ""
     echo "======================================================"
-    echo "TEST $count/$total: workload=$WORKLOAD nemesis=$NEMESIS"
+    echo "TEST $count/$total: workload=$WORKLOAD nemesis=$NEMESIS (${TL}s)"
     echo "Started at: $(date)"
     echo "======================================================"
 
-    CMD="cd /jepsen && lein run test $COMMON $NODES --workload $WORKLOAD --nemesis $NEMESIS"
+    CMD="cd /jepsen && lein run test $COMMON --time-limit $TL $NODES --workload $WORKLOAD --nemesis $NEMESIS"
     OUTPUT=$(docker exec jepsen-control sh -c "$CMD" 2>&1)
     EXIT_CODE=$?
 
