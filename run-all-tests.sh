@@ -1,67 +1,112 @@
 #!/bin/bash
-# Run all 20 Jepsen tests: 4 workloads x 5 nemesis
+# Full Jepsen test sweep:
+#   - Leader block:   4 workloads (bank, set, elle, register)
+#                     x 5 nemeses (none, partition, kill, pause, all)             = 20 tests
+#   - Follower block: 2 workloads (register-follower, register-bookmark)
+#                     x 7 nemeses (none, partition, kill, pause, clock, all, all+clock) = 14 tests
+# Total: 34 tests. The follower block forces --read-consistency linearizable so the follower
+# ReadIndex / bookmark paths are exercised.
+#
 # Usage: ./run-all-tests.sh [time-limit]
 #   time-limit: test duration in seconds (default: 90)
-# Note: register/partition always uses 30s to avoid Knossos analysis explosion
+# Note: register/partition and all follower partition/all variants use 30s to avoid
+# Knossos analysis explosion on indeterminate operations.
 
 TIME_LIMIT="${1:-90}"
-WORKLOADS=(bank set elle register)
-NEMESES=(none partition kill pause all)
 NODES="--node n1 --node n2 --node n3 --node n4 --node n5"
 COMMON="--local-dist --username root --password root"
 PASS=0
 FAIL=0
 RESULTS=()
 
-total=0
-for w in "${WORKLOADS[@]}"; do
-  for n in "${NEMESES[@]}"; do
-    total=$((total + 1))
-    done
-done
+# Matrix: each row is "workload nemesis extra-flags time-override"
+# time-override is either empty (use $TIME_LIMIT) or a number in seconds.
+MATRIX=(
+  # -- Leader block --
+  "bank none - -"
+  "bank partition - -"
+  "bank kill - -"
+  "bank pause - -"
+  "bank all - -"
+  "set none - -"
+  "set partition - -"
+  "set kill - -"
+  "set pause - -"
+  "set all - -"
+  "elle none - -"
+  "elle partition - -"
+  "elle kill - -"
+  "elle pause - -"
+  "elle all - -"
+  "register none - -"
+  "register partition - 30"
+  "register kill - -"
+  "register pause - -"
+  "register all - -"
 
+  # -- Follower block (reads routed to a non-leader with LINEARIZABLE consistency) --
+  "register-follower none --read-consistency=linearizable -"
+  "register-follower partition --read-consistency=linearizable 30"
+  "register-follower kill --read-consistency=linearizable -"
+  "register-follower pause --read-consistency=linearizable -"
+  "register-follower clock --read-consistency=linearizable -"
+  "register-follower all --read-consistency=linearizable 30"
+  "register-follower all+clock --read-consistency=linearizable 30"
+  "register-bookmark none --read-consistency=linearizable -"
+  "register-bookmark partition --read-consistency=linearizable 30"
+  "register-bookmark kill --read-consistency=linearizable -"
+  "register-bookmark pause --read-consistency=linearizable -"
+  "register-bookmark clock --read-consistency=linearizable -"
+  "register-bookmark all --read-consistency=linearizable 30"
+  "register-bookmark all+clock --read-consistency=linearizable 30"
+)
+
+total=${#MATRIX[@]}
 count=0
-for WORKLOAD in "${WORKLOADS[@]}"; do
-  for NEMESIS in "${NEMESES[@]}"; do
-    count=$((count + 1))
 
-    # register/partition uses 30s to keep Knossos linearizability
-    # analysis tractable (indeterminate ops during partitions cause
-    # exponential search space explosion)
-    if [ "$WORKLOAD" = "register" ] && [ "$NEMESIS" = "partition" ]; then
-      TL=30
-    else
-      TL=$TIME_LIMIT
-    fi
+for ROW in "${MATRIX[@]}"; do
+  read -r WORKLOAD NEMESIS EXTRA TL_OVERRIDE <<< "$ROW"
+  count=$((count + 1))
 
-    echo ""
-    echo "======================================================"
-    echo "TEST $count/$total: workload=$WORKLOAD nemesis=$NEMESIS (${TL}s)"
-    echo "Started at: $(date)"
-    echo "======================================================"
+  if [ "$TL_OVERRIDE" != "-" ]; then
+    TL=$TL_OVERRIDE
+  else
+    TL=$TIME_LIMIT
+  fi
 
-    CMD="cd /jepsen && lein run test $COMMON --time-limit $TL $NODES --workload $WORKLOAD --nemesis $NEMESIS"
-    OUTPUT=$(docker exec jepsen-control sh -c "$CMD" 2>&1)
-    EXIT_CODE=$?
+  EXTRA_FLAGS=""
+  if [ "$EXTRA" != "-" ]; then
+    # Convert --key=value into --key value so lein run parses it correctly
+    EXTRA_FLAGS=$(echo "$EXTRA" | sed 's/=/ /')
+  fi
 
-    echo "$OUTPUT"
+  echo ""
+  echo "======================================================"
+  echo "TEST $count/$total: workload=$WORKLOAD nemesis=$NEMESIS (${TL}s) $EXTRA_FLAGS"
+  echo "Started at: $(date)"
+  echo "======================================================"
 
-    if echo "$OUTPUT" | grep -q ":valid? true"; then
-      STATUS="PASS"
-      PASS=$((PASS + 1))
-    elif echo "$OUTPUT" | grep -q ":valid? :unknown"; then
-      STATUS="UNKNOWN"
-      FAIL=$((FAIL + 1))
-    else
-      STATUS="FAIL"
-      FAIL=$((FAIL + 1))
-    fi
+  CMD="cd /jepsen && lein run test $COMMON --time-limit $TL $NODES --workload $WORKLOAD --nemesis $NEMESIS $EXTRA_FLAGS"
+  OUTPUT=$(docker exec jepsen-control sh -c "$CMD" 2>&1)
+  EXIT_CODE=$?
 
-    RESULTS+=("[$STATUS] workload=$WORKLOAD nemesis=$NEMESIS")
-    echo ""
-    echo "Result: $STATUS"
-    echo "Finished at: $(date)"
-  done
+  echo "$OUTPUT"
+
+  if echo "$OUTPUT" | grep -q ":valid? true"; then
+    STATUS="PASS"
+    PASS=$((PASS + 1))
+  elif echo "$OUTPUT" | grep -q ":valid? :unknown"; then
+    STATUS="UNKNOWN"
+    FAIL=$((FAIL + 1))
+  else
+    STATUS="FAIL"
+    FAIL=$((FAIL + 1))
+  fi
+
+  RESULTS+=("[$STATUS] workload=$WORKLOAD nemesis=$NEMESIS $EXTRA_FLAGS")
+  echo ""
+  echo "Result: $STATUS"
+  echo "Finished at: $(date)"
 done
 
 echo ""
@@ -72,4 +117,4 @@ for r in "${RESULTS[@]}"; do
   echo "  $r"
 done
 echo ""
-echo "All 20 tests completed at: $(date)"
+echo "All $total tests completed at: $(date)"

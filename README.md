@@ -60,6 +60,36 @@ Tests single-key read/write/CAS operations routed to the leader, checked by the 
 
 Each test takes ~3-4 minutes (cluster startup + 90s test + analysis + teardown). The full matrix of 20 tests takes ~60 minutes with fresh cluster restarts between each test.
 
+### Register-Follower Workload (follower linearizability via ReadIndex)
+
+Same register workload, but READS are routed to a non-leader node with `X-ArcadeDB-Read-Consistency: LINEARIZABLE` and no bookmark. This exercises the Ratis ReadIndex path on followers (`RaftHAServer.ensureLinearizableFollowerRead()`): the follower issues `sendReadOnly()` to the leader, the leader verifies it still holds a quorum and returns its current commit index, the follower waits for its local state machine to catch up, then serves the read. Without that round-trip a lagging follower would serve stale data and fail Knossos. Writes still go to the leader.
+
+| Nemesis | Result |
+|---------|--------|
+| none | :white_check_mark: PASS |
+| partition | :white_check_mark: PASS |
+| kill | :white_check_mark: PASS |
+| pause | :white_check_mark: PASS |
+| clock | :white_check_mark: PASS |
+| all | :white_check_mark: PASS |
+| all+clock | :white_check_mark: PASS |
+
+### Register-Bookmark Workload (follower read-your-writes via commit-index bookmark)
+
+Same register workload with follower reads, but every write response's `X-ArcadeDB-Commit-Index` header is captured and echoed back as `X-ArcadeDB-Read-After` on subsequent reads. The follower waits for its local apply to reach that index before serving. This covers the bookmark-carrying path, which is cheaper than ReadIndex but only guarantees read-your-writes for the issuing client (not global linearizability across clients).
+
+| Nemesis | Result |
+|---------|--------|
+| none | :white_check_mark: PASS |
+| partition | :white_check_mark: PASS |
+| kill | :white_check_mark: PASS |
+| pause | :white_check_mark: PASS |
+| clock | :white_check_mark: PASS |
+| all | :white_check_mark: PASS |
+| all+clock | :white_check_mark: PASS |
+
+Total suite: **34/34 PASS** (20 leader-only + 14 follower-read variants).
+
 ### Read Consistency Levels
 
 ArcadeDB supports three read consistency levels via `arcadedb.ha.readConsistency` (or per-request via the `X-ArcadeDB-Read-Consistency` HTTP header):
@@ -80,6 +110,8 @@ In **linearizable mode** (recommended for Jepsen testing), the leader verifies i
 | **set** | Replication completeness: inserts unique elements, verifies none are lost | Custom set checker |
 | **elle** | Transaction isolation: multi-key read/write txns, checks for G0/G1a/G1b/G2/lost-update | Elle cycle-detection checker |
 | **register** | Linearizability: single-key read/write/CAS, all operations routed to the leader | Knossos linearizability checker |
+| **register-follower** | Linearizability of reads routed to a follower with `LINEARIZABLE` + no bookmark (ReadIndex path) | Knossos linearizability checker |
+| **register-bookmark** | Read-your-writes of reads routed to a follower with `LINEARIZABLE` + write-derived bookmark | Knossos linearizability checker |
 
 ## Nemesis Faults
 
@@ -89,7 +121,9 @@ In **linearizable mode** (recommended for Jepsen testing), the leader verifies i
 | `partition` | Random network partitions via iptables |
 | `kill` | SIGKILL random nodes (simulates crashes) |
 | `pause` | SIGSTOP/SIGCONT random nodes (simulates GC pauses) |
-| `all` | All of the above combined |
+| `clock` | `date -s` shifts one node's clock by a random ±60s, best-effort `ntpdate` to reset |
+| `all` | partition + kill + pause combined |
+| `all+clock` | all + clock |
 
 ## Quick Start (Docker)
 
@@ -161,6 +195,17 @@ cd docker
 docker compose down -v
 ```
 
+## Batch Scripts
+
+Two scripts sweep the test matrix:
+
+| Script | Matrix | Purpose |
+|--------|--------|---------|
+| `run-all-tests.sh [time-limit]` | Leader block (20 tests) + Follower block (14 tests) = **34 tests** | Full regression sweep; the follower block auto-passes `--read-consistency linearizable` |
+| `run-follower-tests.sh [time-limit]` | 2 workloads (register-follower, register-bookmark) × 7 nemeses (none, partition, kill, pause, clock, all, all+clock) = **14 tests** | Follower read-consistency paths only; useful for focused iteration |
+
+Both default to a 90s time-limit per test. Partition / all variants are shortened to 30s to keep Knossos analysis tractable.
+
 ## Running Against a Released Version (No Build Required)
 
 To test a released ArcadeDB version (downloaded from GitHub):
@@ -178,8 +223,8 @@ Note: released versions before the `apache-ratis` branch do not have Ratis HA, s
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--workload` | `bank` | Workload: `bank`, `set`, `elle`, or `register` |
-| `--nemesis` | `all` | Faults: `none`, `partition`, `kill`, `pause`, `all` |
+| `--workload` | `bank` | Workload: `bank`, `set`, `elle`, `register`, `register-follower`, `register-bookmark` |
+| `--nemesis` | `all` | Faults: `none`, `partition`, `kill`, `pause`, `clock`, `all`, `all+clock` |
 | `--time-limit` | `60` | Test duration in seconds |
 | `--local-dist` | `false` | Use local build from `dist/` instead of downloading |
 | `--version` | `25.3.1` | ArcadeDB release version (ignored with `--local-dist`) |
@@ -202,8 +247,10 @@ arcadedb-jepsen/
     bank.clj               Bank workload (ACID balance conservation)
     set.clj                Set workload (replication completeness)
     elle.clj               Elle workload (transaction isolation via cycle detection)
-    register.clj           Register workload (linearizability)
-    nemesis.clj            Fault injection: partitions, kills, pauses
+    register.clj           Register workload (linearizability, leader-only reads)
+    register_follower.clj  Register workload with LINEARIZABLE follower reads (ReadIndex)
+    register_bookmark.clj  Register workload with bookmark-carrying follower reads
+    nemesis.clj            Fault injection: partitions, kills, pauses, clock skew
   docker/
     docker-compose.yml     5 nodes + control container
     Dockerfile.node        Debian + Temurin JDK 21 + SSH

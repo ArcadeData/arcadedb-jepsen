@@ -5,6 +5,8 @@
             [arcadedb-jepsen.db :as db]
             [arcadedb-jepsen.nemesis :as arcn]
             [arcadedb-jepsen.register :as register]
+            [arcadedb-jepsen.register-follower :as register-follower]
+            [arcadedb-jepsen.register-bookmark :as register-bookmark]
             [arcadedb-jepsen.set :as set-workload]
             [arcadedb-jepsen.elle :as elle-workload]
             [clojure.tools.logging :refer [info]]
@@ -18,17 +20,21 @@
 
 (def workloads
   "Map of workload names to constructors."
-  {:bank     bank/workload
-   :register register/workload
-   :set      set-workload/workload
-   :elle     elle-workload/workload})
+  {:bank              bank/workload
+   :register          register/workload
+   :register-follower register-follower/workload
+   :register-bookmark register-bookmark/workload
+   :set               set-workload/workload
+   :elle              elle-workload/workload})
 
 (def fault-sets
   "Named sets of faults for the nemesis."
   {:partition #{:partition}
    :kill      #{:kill}
    :pause     #{:pause}
+   :clock     #{:clock}
    :all       #{:partition :kill :pause}
+   :all+clock #{:partition :kill :pause :clock}
    :none      #{}})
 
 (defn arcadedb-test
@@ -78,12 +84,12 @@
    [nil "--local-dist" "Use local ArcadeDB distribution from dist/ instead of downloading"
     :default false]
 
-   ["-w" "--workload WORKLOAD" "Workload: bank, register, set, elle"
+   ["-w" "--workload WORKLOAD" "Workload: bank, register, register-follower, register-bookmark, set, elle"
     :default :bank
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
 
-   [nil "--nemesis NEMESIS" "Nemesis: partition, kill, pause, all, none"
+   [nil "--nemesis NEMESIS" "Nemesis: partition, kill, pause, clock, all, all+clock, none"
     :default :all
     :parse-fn keyword
     :validate [fault-sets (cli/one-of fault-sets)]]

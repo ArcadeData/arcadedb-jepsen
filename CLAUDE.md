@@ -38,41 +38,62 @@ lein check    # Verifies all 6 namespaces compile cleanly
 
 ```
 src/arcadedb_jepsen/
-  core.clj      - Main entry point, CLI, test assembly
-  db.clj        - ArcadeDB install/start/stop/kill/pause via SSH
-  client.clj    - HTTP client for ArcadeDB REST API + leader discovery
-  bank.clj      - Bank workload (ACID balance conservation)
-  register.clj  - Register workload (linearizability via Knossos)
-  nemesis.clj   - Fault injection: partitions, kills, pauses
+  core.clj               - Main entry point, CLI, test assembly
+  db.clj                 - ArcadeDB install/start/stop/kill/pause via SSH
+  client.clj             - HTTP client for ArcadeDB REST API + leader/follower discovery
+                           + consistency headers (X-ArcadeDB-Read-Consistency, X-ArcadeDB-Read-After)
+  bank.clj               - Bank workload (ACID balance conservation)
+  set.clj                - Set workload (replication completeness)
+  elle.clj               - Elle workload (transaction isolation via cycle detection)
+  register.clj           - Register workload (linearizability, leader-routed reads)
+  register_follower.clj  - Register workload with LINEARIZABLE follower reads (ReadIndex path)
+  register_bookmark.clj  - Register workload with bookmark-carrying follower reads
+  nemesis.clj            - Fault injection: partitions, kills, pauses, clock skew
 docker/
   Dockerfile.node     - Debian + JDK 21 + SSH for test nodes
   Dockerfile.control  - Debian + JDK 21 + Leiningen for control
   docker-compose.yml  - 5 nodes + control container
   setup-ssh.sh        - Configures SSH keys between control and nodes
 dist/                 - Local ArcadeDB tarball (gitignored)
+run-all-tests.sh         - 20-test leader-baseline sweep (4 workloads × 5 nemeses)
+run-follower-tests.sh    - 14-test follower-read sweep (2 workloads × 7 nemeses)
 ```
 
 ## Workloads
 
 - **bank**: Creates 5 accounts with 1000 each, runs concurrent transfers, checks total balance is always 5000. Tests ACID under replication.
+- **set**: Inserts unique elements concurrently, reads all at the end, verifies no acknowledged write was lost.
+- **elle**: Multi-key read/write transactions; Elle's dependency-graph cycle detection checks for G0, G1a, G1b, G2 and lost updates.
 - **register**: Single-key read/write/CAS checked by Knossos for linearizability. Uses leader-routing to test the strongest consistency guarantee.
+- **register-follower**: Same as register, but READS are routed to a non-leader with `X-ArcadeDB-Read-Consistency: LINEARIZABLE` and no bookmark. Exercises the Ratis `sendReadOnly` ReadIndex path (`RaftHAServer.ensureLinearizableFollowerRead()`). Writes still go to the leader.
+- **register-bookmark**: Same as register-follower, but each write's `X-ArcadeDB-Commit-Index` response header is captured and echoed back as `X-ArcadeDB-Read-After` on subsequent reads. Tests the bookmark-wait follower path (cheaper than ReadIndex; read-your-writes for the caller, not global linearizability).
 
 ## CLI Options
 
 ```
---workload bank|register    Workload to run (default: bank)
---nemesis none|partition|kill|pause|all    Faults to inject (default: all)
+--workload bank|set|elle|register|register-follower|register-bookmark   (default: bank)
+--nemesis  none|partition|kill|pause|clock|all|all+clock                (default: all)
 --time-limit N              Test duration in seconds (default: 60)
 --local-dist                Use local build from dist/ instead of downloading
 --version X.Y.Z             ArcadeDB release version (when not using --local-dist)
+--read-consistency eventual|read_your_writes|linearizable    Server-side default (default: read_your_writes)
 --rate N                    Operations per second (default: 10)
 ```
+
+## Batch Runners
+
+- `./run-all-tests.sh [time-limit]` - 20-test leader-baseline sweep. **Do not modify**: used by the reported 20/20 pass.
+- `./run-follower-tests.sh [time-limit]` - 14-test follower-read sweep. Always sets `--read-consistency linearizable` so the follower paths are exercised. Shortens partition/all variants to 30s.
+
+Combined baseline: **34/34 PASS** (20 leader + 14 follower).
 
 ## Code Guidelines
 
 - All code is Clojure (not Java)
 - Use AssertJ-style assertions in test descriptions
 - The nemesis is a single reify (not nemesis/compose) to avoid setup/teardown issues
-- Leader discovery caches the leader and invalidates on connection errors
+- Leader discovery caches the leader and invalidates on connection errors; follower discovery is the symmetric inverse (see `client.clj` `find-follower` / `follower-client`)
 - Bank client retries setup with backoff for HA leader election
 - Process kill uses `ps | grep '[A]rcadeDB'` trick to avoid matching the grep itself
+- Consistency headers are added via the package-private helper `apply-consistency-headers!` in `client.clj`; `command!` and `query!` accept an optional trailing opts map `{:consistency :linearizable :bookmark 42}`
+- `command-with-index!` is the commit-tracking variant: returns `{:body ... :commit-index N}` by reading `X-ArcadeDB-Commit-Index` from the response

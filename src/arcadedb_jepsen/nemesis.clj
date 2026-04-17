@@ -79,6 +79,31 @@
               (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -CONT 2>/dev/null; true"))
             (assoc op :value (str "resumed " node)))
 
+          ;; Clock skew via `date -s` (best-effort, requires root on the target).
+          ;; Shifts one random node's clock by a random offset in [-60s, +60s]. The value
+          ;; is intentionally small relative to Raft election timeouts so the cluster stays
+          ;; recoverable - the point is to exercise lease-read / time-dependent code paths,
+          ;; not to stress-test NTP.
+          :clock-skew
+          (let [node   (rand-nth (vec (:nodes test)))
+                offset (- (rand-int 120) 60)]
+            (try
+              (c/on node
+                (c/exec :sh :-c (str "date -s @$(($(date +%s) + " offset "))")))
+              (catch Exception e
+                (info "Clock skew failed on" node ":" (.getMessage e))))
+            (assoc op :value (str "skewed " node " by " offset "s")))
+
+          :clock-reset
+          (doseq [node (:nodes test)]
+            (try
+              (c/on node
+                ;; Best-effort resync via ntpdate if present; otherwise no-op. A follow-up
+                ;; hard-reset to the Jepsen control-node's time would require jepsen.nemesis.time.
+                (c/exec :sh :-c "command -v ntpdate >/dev/null && ntpdate -u pool.ntp.org >/dev/null 2>&1; true"))
+              (catch Exception e
+                (info "Clock reset failed on" node ":" (.getMessage e)))))
+
           ;; Default: ignore unknown ops (e.g. during setup/teardown)
           (assoc op :value :ignored)))
 
@@ -101,7 +126,11 @@
 
                  (:pause faults)
                  (into [{:type :info :f :pause}
-                        {:type :info :f :resume}]))]
+                        {:type :info :f :resume}])
+
+                 (:clock faults)
+                 (into [{:type :info :f :clock-skew}
+                        {:type :info :f :clock-reset}]))]
     (when (seq ops)
       (gen/cycle
         (fn [] (->> (partition 2 ops)
