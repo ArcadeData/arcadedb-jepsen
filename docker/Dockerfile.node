@@ -1,3 +1,27 @@
+# Multi-stage build: stage 1 compiles LazyFS, stage 2 ships only the runtime.
+# LazyFS lets us simulate power-loss by dropping unfsync'd pages on demand.
+# https://github.com/dsrhaslab/lazyfs
+
+FROM debian:bookworm AS lazyfs-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates build-essential cmake pkg-config libtool \
+    libfuse3-dev fuse3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN git clone --depth=1 https://github.com/dsrhaslab/lazyfs.git lazyfs \
+    && cd lazyfs && git submodule update --init --recursive
+
+# Build libpcache, then LazyFS itself. Both ship build.sh wrappers around cmake.
+RUN cd /build/lazyfs/libs/libpcache && ./build.sh
+RUN cd /build/lazyfs/lazyfs && ./build.sh
+
+# The compiled binary lives at /build/lazyfs/lazyfs/build/lazyfs
+
+
 FROM debian:bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,10 +36,23 @@ RUN apt-get update && apt-get install -y \
     faketime \
     wget \
     gnupg \
+    fuse3 \
     && wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb bookworm main" > /etc/apt/sources.list.d/adoptium.list \
     && apt-get update && apt-get install -y temurin-21-jdk sudo \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy the LazyFS binary and its libpcache shared lib from the builder stage.
+COPY --from=lazyfs-builder /build/lazyfs/lazyfs/build/lazyfs /usr/local/bin/lazyfs
+COPY --from=lazyfs-builder /build/lazyfs/libs/libpcache/build/libpcache.so.0 /usr/local/lib/libpcache.so.0
+RUN chmod +x /usr/local/bin/lazyfs \
+    && ln -s /usr/local/lib/libpcache.so.0 /usr/local/lib/libpcache.so \
+    && echo "/usr/local/lib" > /etc/ld.so.conf.d/lazyfs.conf \
+    && ldconfig
+
+# Allow non-root mounts to be visible to root (we run as root, but the FUSE
+# allow_other option still needs this enabled).
+RUN echo "user_allow_other" >> /etc/fuse.conf
 
 # Configure SSH
 RUN mkdir /var/run/sshd && \
