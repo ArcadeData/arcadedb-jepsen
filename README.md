@@ -2,7 +2,7 @@
 
 [Jepsen](https://jepsen.io) tests for [ArcadeDB](https://arcadedb.com), a multi-model distributed database.
 
-Verifies correctness of ArcadeDB's Raft-based high availability under network partitions, process crashes, and process pauses.
+Verifies correctness of ArcadeDB's Raft-based high availability under network partitions, process crashes, process pauses, clock skew, and **simulated power loss** (LazyFS-backed fsync durability).
 
 ## Results
 
@@ -88,7 +88,32 @@ Same register workload with follower reads, but every write response's `X-Arcade
 | all | :white_check_mark: PASS |
 | all+clock | :white_check_mark: PASS |
 
-Total suite: **34/34 PASS** (20 leader-only + 14 follower-read variants).
+### LazyFS Power-Loss Sweep (fsync durability under simulated power loss)
+
+ArcadeDB's data directory (`/opt/arcadedb/databases`) and Ratis log directory (`/opt/arcadedb/ratis-storage`) are mounted on [LazyFS](https://github.com/dsrhaslab/lazyfs), a FUSE filesystem that buffers writes in memory until `fsync()`. The nemesis can drop those unsynced pages on demand and then SIGKILL the JVM, modelling instantaneous power loss. This is the only nemesis that actually verifies fsync durability — `kill -9` alone lets the kernel page cache flush normally, so unfsynced writes survive.
+
+Tests in this sweep automatically set `-Darcadedb.server.mode=production` in `JAVA_OPTS`, which is required for ArcadeDB to call `fsync()` (the default development mode skips fsync for performance — without production mode the test would be meaningless).
+
+Two new fault ops:
+
+- **`:lose-unfsynced-writes`** — random node: send `lazyfs::clear-cache` to drop unsynced pages on both LazyFS mounts, then SIGKILL the JVM, then restart on the next nemesis tick.
+- **`:lose-unfsynced-writes-leader`** — same, but specifically targets the current Raft leader (the most adversarial case: leader has the most uncommitted state).
+
+Safety invariant: at most ⌊(n-1)/2⌋ = 2 nodes power-killed simultaneously. Going beyond exceeds Raft's failure model — any inconsistency observed past the quorum bound proves nothing about the protocol.
+
+| Workload | `lazyfs` | `all+lazyfs` |
+|---|---|---|
+| bank | :white_check_mark: PASS | :white_check_mark: PASS |
+| set | :white_check_mark: PASS | :white_check_mark: PASS |
+| elle | :white_check_mark: PASS | :white_check_mark: PASS |
+| register | :white_check_mark: PASS | :white_check_mark: PASS |
+| register-follower | :white_check_mark: PASS | :white_check_mark: PASS |
+
+10/10 PASS. Across the sweep, 45 power-loss + recovery events fired across the random and leader-targeted variants.
+
+Total suite: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-loss).
+
+> **Caveat on the 34-test baseline.** The original 20 + 14 tests run in default (development) mode, where ArcadeDB does NOT call `fsync()`. They verify replication and consensus correctness, not on-disk durability. Only the 10 LazyFS tests run with production-mode fsync. Flipping the baseline to production mode is a worthwhile follow-up.
 
 ### Read Consistency Levels
 
@@ -122,8 +147,10 @@ In **linearizable mode** (recommended for Jepsen testing), the leader verifies i
 | `kill` | SIGKILL random nodes (simulates crashes) |
 | `pause` | SIGSTOP/SIGCONT random nodes (simulates GC pauses) |
 | `clock` | `date -s` shifts one node's clock by a random ±60s, best-effort `ntpdate` to reset |
+| `lazyfs` | LazyFS-backed power loss: drop unsynced cache pages on a random or leader node, SIGKILL, then restart. Auto-sets `-Darcadedb.server.mode=production`. |
 | `all` | partition + kill + pause combined |
 | `all+clock` | all + clock |
+| `all+lazyfs` | partition + kill + pause + lazyfs |
 
 ## Quick Start (Docker)
 
@@ -203,8 +230,9 @@ Two scripts sweep the test matrix:
 |--------|--------|---------|
 | `run-all-tests.sh [time-limit]` | Leader block (20 tests) + Follower block (14 tests) = **34 tests** | Full regression sweep; the follower block auto-passes `--read-consistency linearizable` |
 | `run-follower-tests.sh [time-limit]` | 2 workloads (register-follower, register-bookmark) × 7 nemeses (none, partition, kill, pause, clock, all, all+clock) = **14 tests** | Follower read-consistency paths only; useful for focused iteration |
+| `run-lazyfs-tests.sh [time-limit]` | 5 workloads (bank, set, elle, register, register-follower) × 2 nemeses (lazyfs, all+lazyfs) = **10 tests** | LazyFS power-loss sweep; production mode is auto-enabled (required for fsync). Each test takes ~50s wall time; full sweep ≈9 minutes. |
 
-Both default to a 90s time-limit per test. Partition / all variants are shortened to 30s to keep Knossos analysis tractable.
+All three default to a 90s time-limit per test. Partition / all / all+lazyfs variants are shortened to 30s to keep Knossos analysis tractable.
 
 ## Running Against a Released Version (No Build Required)
 
@@ -224,7 +252,7 @@ Note: released versions before the `apache-ratis` branch do not have Ratis HA, s
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--workload` | `bank` | Workload: `bank`, `set`, `elle`, `register`, `register-follower`, `register-bookmark` |
-| `--nemesis` | `all` | Faults: `none`, `partition`, `kill`, `pause`, `clock`, `all`, `all+clock` |
+| `--nemesis` | `all` | Faults: `none`, `partition`, `kill`, `pause`, `clock`, `lazyfs`, `all`, `all+clock`, `all+lazyfs` |
 | `--time-limit` | `60` | Test duration in seconds |
 | `--local-dist` | `false` | Use local build from `dist/` instead of downloading |
 | `--version` | `25.3.1` | ArcadeDB release version (ignored with `--local-dist`) |
@@ -250,14 +278,18 @@ arcadedb-jepsen/
     register.clj           Register workload (linearizability, leader-only reads)
     register_follower.clj  Register workload with LINEARIZABLE follower reads (ReadIndex)
     register_bookmark.clj  Register workload with bookmark-carrying follower reads
-    nemesis.clj            Fault injection: partitions, kills, pauses, clock skew
+    nemesis.clj            Fault injection: partitions, kills, pauses, clock skew, LazyFS power loss
   docker/
     docker-compose.yml     5 nodes + control container
-    Dockerfile.node        Debian + Temurin JDK 21 + SSH
+    Dockerfile.node        Debian + Temurin JDK 21 + SSH; multi-stage build that
+                           also compiles and ships LazyFS + libpcache (~10 MB)
     Dockerfile.control     Debian + Temurin JDK 21 + Leiningen
     setup-ssh.sh           SSH key distribution
   resources/
     logback.xml            Logging config
+  run-all-tests.sh         34-test baseline sweep (leader + follower)
+  run-follower-tests.sh    14-test follower-only sweep
+  run-lazyfs-tests.sh      10-test LazyFS power-loss sweep
 ```
 
 ## Licensing
