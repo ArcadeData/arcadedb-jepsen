@@ -106,3 +106,13 @@ Combined baseline: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-los
 - Process kill uses `ps | grep '[A]rcadeDB'` trick to avoid matching the grep itself
 - Consistency headers are added via the package-private helper `apply-consistency-headers!` in `client.clj`; `command!` and `query!` accept an optional trailing opts map `{:consistency :linearizable :bookmark 42}`
 - `command-with-index!` is the commit-tracking variant: returns `{:body ... :commit-index N}` by reading `X-ArcadeDB-Commit-Index` from the response
+
+## LazyFS Notes (only relevant when `:lazyfs?` is on)
+
+- LazyFS lives at `/usr/local/bin/lazyfs` in the node images (multi-stage Docker build). `libpcache.so.0` is in `/usr/local/lib`; `ldconfig` runs at image build so the loader can find it.
+- ArcadeDB+Ratis writes to **`/opt/arcadedb/ratis-storage/<server>_<port>/`** — note the directory name is `ratis-storage`, NOT `raft-storage`. Mounting LazyFS on the wrong path produces a silent false negative: the test passes for the wrong reason because Ratis writes to a non-LazyFS dir.
+- LazyFS mounts: `/opt/arcadedb/databases` (data) and `/opt/arcadedb/ratis-storage` (Ratis log). Backing dirs at `/var/lib/lazyfs-backing/{databases,ratis-storage}`. Control fifos at `/tmp/lazyfs-{databases,raft}.fifo` (the `raft` name is internal-label-only; the mount itself is at `ratis-storage`).
+- Production mode: `start!` adds `-Darcadedb.server.mode=production` to `JAVA_OPTS` whenever `(lazyfs? test)`. Without this, ArcadeDB skips fsync and the test is meaningless.
+- **Unmount order matters.** Do `fusermount3 -u <path>` FIRST (clean unmount; signals the LazyFS daemon to exit gracefully). If that fails, fall back to `fusermount3 -u -z` (lazy), then `umount -lf` (last resort). Never `pkill lazyfs` BEFORE the unmount — killing the daemon strands the mount in "Transport endpoint is not connected" state, and only a container restart clears it.
+- Safety invariant: at most ⌊(n-1)/2⌋ nodes can be power-killed concurrently. With n=5 that's max 2. Enforced by `pick-power-target` in `nemesis.clj` against an atom-tracked `power-killed` set; over the cap the op returns `:skipped-safety-cap` rather than breaking quorum.
+- Two LazyFS ops: `:lose-unfsynced-writes` (random node) and `:lose-unfsynced-writes-leader` (leader-targeted via `client/find-leader`). Recovery: `:recover-from-power-loss` calls `(db/start! ...)` on a tracked-down node.
