@@ -29,13 +29,15 @@
 
 (def fault-sets
   "Named sets of faults for the nemesis."
-  {:partition #{:partition}
-   :kill      #{:kill}
-   :pause     #{:pause}
-   :clock     #{:clock}
-   :all       #{:partition :kill :pause}
-   :all+clock #{:partition :kill :pause :clock}
-   :none      #{}})
+  {:partition  #{:partition}
+   :kill       #{:kill}
+   :pause      #{:pause}
+   :clock      #{:clock}
+   :lazyfs     #{:lazyfs}
+   :all        #{:partition :kill :pause}
+   :all+clock  #{:partition :kill :pause :clock}
+   :all+lazyfs #{:partition :kill :pause :lazyfs}
+   :none       #{}})
 
 (defn arcadedb-test
   "Constructs a Jepsen test map for ArcadeDB."
@@ -44,7 +46,8 @@
         workload      ((workloads workload-name) opts)
         faults        (get fault-sets (:nemesis opts :all) #{:partition})
         nem           (arcn/full-nemesis {:faults faults})
-        local-dist?   (:local-dist opts false)]
+        local-dist?   (:local-dist opts false)
+        lazyfs?       (contains? faults :lazyfs)]
     (merge tests/noop-test
            opts
            {:name          (str "arcadedb-" (name workload-name)
@@ -70,6 +73,7 @@
             :root-password     root-password
             :cluster-name      "jepsen-cluster"
             :local-dist        local-dist?
+            :lazyfs?           lazyfs?
             :read-consistency  (:read-consistency opts :read_your_writes)
             :setup-lock    (Object.)
             :setup-done    (atom false)
@@ -89,7 +93,7 @@
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
 
-   [nil "--nemesis NEMESIS" "Nemesis: partition, kill, pause, clock, all, all+clock, none"
+   [nil "--nemesis NEMESIS" "Nemesis: partition, kill, pause, clock, lazyfs, all, all+clock, all+lazyfs, none"
     :default :all
     :parse-fn keyword
     :validate [fault-sets (cli/one-of fault-sets)]]
