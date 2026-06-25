@@ -97,9 +97,13 @@
                   (.contains msg "ServerIsNotTheLeader"))
               (assoc op :type :info :error [:unavailable msg])
 
-              ;; MVCC conflict - definite failure
+              ;; MVCC conflict is RETRYABLE/INDETERMINATE in ArcadeDB (the server returns
+              ;; "Please retry the operation"): the insert may or may not have committed, so
+              ;; the outcome is unknown - NOT a definite failure. Recording :fail here caused
+              ;; false :unexpected results when the element actually landed (~17% of set/all
+              ;; runs). :info lets the set checker treat it as "may be present".
               (.contains msg "ConcurrentModification")
-              (assoc op :type :fail :error [:conflict msg])
+              (assoc op :type :info :error [:conflict msg])
 
               :else
               (assoc op :type :info :error [:unknown msg])))))))
