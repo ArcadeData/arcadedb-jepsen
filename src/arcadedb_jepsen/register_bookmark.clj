@@ -60,10 +60,13 @@
   [client bookmark k]
   (let [opts (cond-> {:consistency :linearizable}
                bookmark (assoc :bookmark bookmark))
-        result (ac/command! client "sql"
-                            (str "SELECT val FROM Register WHERE key = '" k "'")
-                            nil
-                            opts)]
+        ;; MUST use query! (/api/v1/query): only RaftReplicatedDatabase.query() applies
+        ;; read consistency (waitForReadConsistency -> waitForAppliedIndex for the bookmark).
+        ;; The command endpoint accepts X-ArcadeDB-Read-After but ignores it, so a SELECT via
+        ;; command! silently skips the bookmark wait (eventual read).
+        result (ac/query! client
+                          (str "SELECT val FROM Register WHERE key = '" k "'")
+                          opts)]
     (when-let [records (seq (get-in result [:result]))]
       (:val (first records)))))
 

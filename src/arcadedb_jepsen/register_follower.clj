@@ -36,10 +36,13 @@
   "Reads from a follower with LINEARIZABLE consistency and no bookmark. This is the
    exact request shape that the follower ReadIndex code path must serve correctly."
   [client k]
-  (let [result (ac/command! client "sql"
-                            (str "SELECT val FROM Register WHERE key = '" k "'")
-                            nil
-                            {:consistency :linearizable})]
+  ;; MUST use query! (/api/v1/query): only RaftReplicatedDatabase.query() calls
+  ;; waitForReadConsistency() -> ensureLinearizableFollowerRead(). The command endpoint
+  ;; (/api/v1/command) accepts the X-ArcadeDB-Read-Consistency header but never applies it,
+  ;; so a SELECT sent via command! silently bypasses the linearizable barrier (eventual read).
+  (let [result (ac/query! client
+                          (str "SELECT val FROM Register WHERE key = '" k "'")
+                          {:consistency :linearizable})]
     (when-let [records (seq (get-in result [:result]))]
       (:val (first records)))))
 

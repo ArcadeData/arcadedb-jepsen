@@ -155,16 +155,20 @@
   (reset! *leader-cache* nil))
 
 (defn query!
-  "Executes a SQL query (read-only) on ArcadeDB.
-   An optional trailing opts map may set {:consistency :linearizable :bookmark 42}
-   to attach X-ArcadeDB-Read-Consistency / X-ArcadeDB-Read-After headers."
+  "Executes a read-only SQL query via POST /api/v1/query, so that
+   RaftReplicatedDatabase.query() runs waitForReadConsistency() (the command endpoint does
+   not). An optional trailing opts map may set {:consistency :linearizable :bookmark 42} to
+   attach X-ArcadeDB-Read-Consistency / X-ArcadeDB-Read-After headers.
+   POST with a JSON body avoids the GET path-encoding pitfall (URLEncoder encodes spaces as
+   '+', which the server path parser does not treat as a space)."
   [client command & [opts]]
-  (let [url  (str (:base-url client) "/api/v1/query/" (:database client)
-                  "/sql/" (java.net.URLEncoder/encode ^String command "UTF-8"))
+  (let [url  (str (:base-url client) "/api/v1/query/" (:database client))
+        body {:language "sql" :command command}
         request (-> (HttpRequest/newBuilder)
                     (.uri (URI/create url))
                     (.header "Authorization" (:auth client))
-                    (.GET)
+                    (.header "Content-Type" "application/json")
+                    (.POST (HttpRequest$BodyPublishers/ofString (json/generate-string body)))
                     (.timeout (Duration/ofSeconds 10))
                     (apply-consistency-headers! opts)
                     (.build))
