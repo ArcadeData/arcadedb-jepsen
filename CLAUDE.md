@@ -61,6 +61,7 @@ dist/                 - Local ArcadeDB tarball (gitignored)
 run-all-tests.sh         - 34-test baseline sweep (20 leader + 14 follower)
 run-follower-tests.sh    - 14-test follower-read sweep (2 workloads × 7 nemeses)
 run-lazyfs-tests.sh      - 10-test LazyFS power-loss sweep (5 workloads × 2 nemeses)
+run-ha-convergence-tests.sh - 6-test replica-health sweep (ha-convergence × 6 nemeses)
 ```
 
 ## Workloads
@@ -92,8 +93,9 @@ LazyFS is **a nemesis, not a workload** — any of the workloads above can run u
 - `./run-all-tests.sh [time-limit]` — 34-test baseline sweep. **Do not modify**: used by the reported 34/34 pass.
 - `./run-follower-tests.sh [time-limit]` — 14-test follower-read sweep. Always sets `--read-consistency linearizable` so the follower paths are exercised. Shortens partition/all variants to 30s.
 - `./run-lazyfs-tests.sh [time-limit]` — 10-test LazyFS power-loss sweep (5 workloads × {`lazyfs`, `all+lazyfs`}). Auto-enables production mode; `all+lazyfs` runs are shortened to 30s.
+- `./run-ha-convergence-tests.sh [time-limit]` — 6-test replica-health sweep (ha-convergence × {none, partition, kill, pause, all, all+lazyfs}). After each run heals + settles, reads every node directly and checks liveness/convergence/completeness (targets #4740 phase-2 divergence + #4728 stalled-replica recovery). `all+lazyfs` runs in production mode at 30s.
 
-Combined baseline: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-loss).
+Combined baseline: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-loss). The ha-convergence sweep is a separate replica-health regression guard.
 
 > The 34-test baseline runs in default (development) mode where ArcadeDB does NOT call `fsync()` — it verifies replication and consensus, not on-disk durability. Only the LazyFS sweep runs with production-mode fsync. Flag this nuance if asked about durability guarantees.
 
