@@ -131,7 +131,9 @@
             :when (try
                     (let [^HttpResponse resp (.send http req (HttpResponse$BodyHandlers/ofString))
                           body (json/parse-string (str (.body resp)) true)]
-                      (get-in body [:ha :isLeader]))
+                      ;; Ratis HA nests the per-node leader flag under ha.network.isLeader
+                      ;; (older ArcadeDB HA exposed it at ha.isLeader).
+                      (get-in body [:ha :network :isLeader]))
                     (catch Exception _ false))]
         node))))
 
@@ -195,7 +197,7 @@
             :when (try
                     (let [^HttpResponse resp (.send http req (HttpResponse$BodyHandlers/ofString))
                           body (json/parse-string (str (.body resp)) true)
-                          leader? (get-in body [:ha :isLeader])]
+                          leader? (get-in body [:ha :network :isLeader])]
                       (and (some? leader?) (not leader?)))
                     (catch Exception _ false))]
         node))))

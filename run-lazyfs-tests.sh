@@ -37,8 +37,11 @@ for WORKLOAD in "${WORKLOADS[@]}"; do
     count=$((count + 1))
 
     # Linearizability + lots of process restarts is hard on Knossos; keep the
-    # combined runs short.
-    if [[ "$NEMESIS" == "all+lazyfs" ]]; then
+    # combined runs short. register-follower is a Knossos (linearizable) workload, and
+    # the post-power-loss leaderless window produces many indeterminate ops that blow up
+    # the analysis (90s register-follower/lazyfs returned :unknown) -- shorten both of
+    # its lazyfs variants to 30s as well.
+    if [[ "$NEMESIS" == "all+lazyfs" || "$WORKLOAD" == "register-follower" ]]; then
       TL=30
     else
       TL=$TIME_LIMIT
@@ -62,10 +65,15 @@ for WORKLOAD in "${WORKLOADS[@]}"; do
 
     echo "$OUTPUT"
 
-    if echo "$OUTPUT" | grep -q ":valid? true"; then
+    # Classify on the TOP-LEVEL :valid? — the LAST :valid? token in the results map.
+    # A plain `grep ":valid? true"` is unreliable: the output always contains nested
+    # `:perf`/`:clock` `:valid? true` entries, so it reports PASS even when the workload
+    # failed (or no results were written at all). Empty verdict => crash/UNKNOWN.
+    VERDICT=$(echo "$OUTPUT" | grep -oE ':valid\? (true|false|:unknown)' | tail -1)
+    if [ "$VERDICT" = ":valid? true" ]; then
       STATUS="PASS"
       PASS=$((PASS + 1))
-    elif echo "$OUTPUT" | grep -q ":valid? :unknown"; then
+    elif [ "$VERDICT" = ":valid? :unknown" ] || [ -z "$VERDICT" ]; then
       STATUS="UNKNOWN"
       FAIL=$((FAIL + 1))
     else

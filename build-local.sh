@@ -11,6 +11,11 @@ set -e
 ARCADEDB_DIR="${1:?Usage: $0 /path/to/arcadedb [--skip-build]}"
 SKIP_BUILD="${2:-}"
 
+# Resolve this script's directory up front. The build step below `cd`s into the
+# ArcadeDB source tree, so computing SCRIPT_DIR from $0 afterwards would resolve
+# to the source tree and drop the tarball there instead of into this repo's dist/.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 if [ ! -f "$ARCADEDB_DIR/pom.xml" ]; then
   echo "ERROR: $ARCADEDB_DIR does not look like an ArcadeDB source tree"
   exit 1
@@ -33,7 +38,6 @@ if [ ! -f "$TARBALL" ]; then
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$SCRIPT_DIR/dist"
 cp "$TARBALL" "$SCRIPT_DIR/dist/arcadedb.tar.gz"
 

@@ -88,6 +88,9 @@
    [nil "--local-dist" "Use local ArcadeDB distribution from dist/ instead of downloading"
     :default false]
 
+   [nil "--production" "Force -Darcadedb.server.mode=production (real fsync) even without LazyFS"
+    :default false]
+
    ["-w" "--workload WORKLOAD" "Workload: bank, register, register-follower, register-bookmark, set, elle"
     :default :bank
     :parse-fn keyword

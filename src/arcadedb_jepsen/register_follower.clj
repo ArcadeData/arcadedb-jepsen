@@ -75,15 +75,19 @@
 
   (invoke! [this test op]
     (let [[k v] (:value op)
-          key-str (str "r" k)
-          leader-conn (or @leader-conn-atom
-                         (let [c (find-leader-conn test)]
-                           (reset! leader-conn-atom c) c))
-          follower-conn (or @follower-conn-atom
-                            (let [c (find-follower-conn test)]
-                              (reset! follower-conn-atom c) c))]
+          key-str (str "r" k)]
       (try
-        (case (:f op)
+        ;; Connection acquisition must stay inside the try: under the kill nemesis the
+        ;; leader can be down when the atoms are still nil, so find-leader-conn throws
+        ;; "No leader found". The catch below turns that into an :info op; outside the
+        ;; try it would escape as an unhandled exception and fail the whole test.
+        (let [leader-conn (or @leader-conn-atom
+                             (let [c (find-leader-conn test)]
+                               (reset! leader-conn-atom c) c))
+              follower-conn (or @follower-conn-atom
+                                (let [c (find-follower-conn test)]
+                                  (reset! follower-conn-atom c) c))]
+          (case (:f op)
           :read
           (let [val (read-register-linearizable follower-conn key-str)]
             (assoc op :type :ok :value (independent/tuple k val)))
@@ -95,7 +99,7 @@
           :cas
           (let [[old-val new-val] v
                 success (reg/cas-register! leader-conn key-str old-val new-val)]
-            (assoc op :type (if success :ok :fail))))
+            (assoc op :type (if success :ok :fail)))))
 
         (catch Exception e
           (let [msg (or (.getMessage e) "")]

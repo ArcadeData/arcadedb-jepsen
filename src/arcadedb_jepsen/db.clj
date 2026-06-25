@@ -39,6 +39,14 @@
   [test]
   (true? (:lazyfs? test)))
 
+(defn production-mode?
+  "Returns true when ArcadeDB should run with -Darcadedb.server.mode=production
+   (real fsync). Always true under LazyFS; also forced by the --production flag so
+   the production fsync path can be exercised under non-LazyFS nemeses (e.g. to
+   reproduce consistency issues under partition+kill without power loss)."
+  [test]
+  (or (lazyfs? test) (true? (:production test))))
+
 (defn- lazyfs-config-content [fifo]
   (str/join "\n"
     ["[faults]"
@@ -143,11 +151,20 @@
   (str "https://github.com/ArcadeData/arcadedb/releases/download/"
        version "/arcadedb-" version ".tar.gz"))
 
+;; Ratis HA bind port. ArcadeDB's RaftHAServer always binds its Raft gRPC port to
+;; GlobalConfiguration.HA_RAFT_PORT (default 2434) -- NOT the port advertised in the
+;; serverList. The serverList port must therefore match HA_RAFT_PORT or peers can never
+;; connect (no leader election). 2480 is the HTTP API port: the third serverList field
+;; supplies the leader's HTTP address for command forwarding from replicas. Without it,
+;; commands fail with "leader HTTP address is not available".
+(def raft-port 2434)
+(def http-port 2480)
+
 (defn server-list
   "Builds the ha.serverList string for a Jepsen test.
-   Format: host1:raftPort,host2:raftPort,..."
+   Format: host1:raftPort:httpPort,host2:raftPort:httpPort,..."
   [test]
-  (str/join "," (map #(str (name %) ":2424") (:nodes test))))
+  (str/join "," (map #(str (name %) ":" raft-port ":" http-port) (:nodes test))))
 
 (defn install-from-url!
   "Downloads and installs ArcadeDB from a URL."
@@ -208,7 +225,7 @@
                        ;; LazyFS tests must run in production mode — the default
                        ;; (development) mode skips fsync, which would render any
                        ;; lose-unfsynced-writes test meaningless.
-                       (when (lazyfs? test) " -Darcadedb.server.mode=production"))
+                       (when (production-mode? test) " -Darcadedb.server.mode=production"))
         script   (str "#!/bin/sh\nexport JAVA_OPTS=\"" java-opts
                       "\"\ncd " install-dir "\nexec bin/server.sh")]
     ;; Ensure no leftover process. [A] trick prevents grep from matching itself.
