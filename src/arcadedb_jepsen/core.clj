@@ -9,6 +9,7 @@
             [arcadedb-jepsen.register-bookmark :as register-bookmark]
             [arcadedb-jepsen.set :as set-workload]
             [arcadedb-jepsen.elle :as elle-workload]
+            [arcadedb-jepsen.ha-convergence :as ha-convergence]
             [clojure.tools.logging :refer [info]]
             [jepsen [checker :as checker]
                     [cli :as cli]
@@ -25,7 +26,13 @@
    :register-follower register-follower/workload
    :register-bookmark register-bookmark/workload
    :set               set-workload/workload
-   :elle              elle-workload/workload})
+   :elle              elle-workload/workload
+   :ha-convergence    ha-convergence/workload})
+
+(def heal-op
+  "Single deterministic nemesis op that fully restores the cluster before the final
+   convergence read (heal partitions, resume paused, recover power loss, start down nodes)."
+  {:type :info :f :heal-all})
 
 (def fault-sets
   "Named sets of faults for the nemesis."
@@ -65,11 +72,22 @@
             :generator     (let [client-gen (->> (:generator workload)
                                                (gen/stagger (/ (:rate opts 10)))
                                                (gen/clients))
-                                  nem-gen   (:generator nem)]
-                            (->> (if nem-gen
-                                   (gen/any client-gen (gen/nemesis nem-gen))
-                                   client-gen)
-                                 (gen/time-limit (:time-limit opts 60))))
+                                  nem-gen   (:generator nem)
+                                  main      (->> (if nem-gen
+                                                   (gen/any client-gen (gen/nemesis nem-gen))
+                                                   client-gen)
+                                                 (gen/time-limit (:time-limit opts 60)))
+                                  final-gen (:final-generator workload)]
+                            ;; If the workload has a :final-generator (e.g. ha-convergence's
+                            ;; per-node read), run it AFTER healing the nemesis and letting
+                            ;; the cluster settle, so it observes the recovered steady state.
+                            (if final-gen
+                              (gen/phases
+                                main
+                                (gen/nemesis (gen/once heal-op))
+                                (gen/sleep 25)
+                                (gen/clients final-gen))
+                              main))
             :root-password     root-password
             :cluster-name      "jepsen-cluster"
             :local-dist        local-dist?
@@ -91,7 +109,7 @@
    [nil "--production" "Force -Darcadedb.server.mode=production (real fsync) even without LazyFS"
     :default false]
 
-   ["-w" "--workload WORKLOAD" "Workload: bank, register, register-follower, register-bookmark, set, elle"
+   ["-w" "--workload WORKLOAD" "Workload: bank, register, register-follower, register-bookmark, set, elle, ha-convergence"
     :default :bank
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]

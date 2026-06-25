@@ -169,6 +169,28 @@
                 (assoc op :value (str "recovered " node)))
             (assoc op :value :nothing-to-recover))
 
+          ;; Full cluster heal for the post-run convergence read: heal partitions, resume
+          ;; paused nodes, clear power-loss tracking, and start ONLY nodes that are actually
+          ;; down (nemesis kills / power loss). Healthy nodes are left untouched, and a node
+          ;; that self-halted (issue #4740) is started here - if its recovery is broken it
+          ;; will fail to come back healthy and surface as unreachable/diverged in the read.
+          :heal-all
+          (do
+            (try (net/heal! (:net test) test) (catch Exception _))
+            (reset! power-killed #{})
+            (doseq [node (:nodes test)]
+              (try
+                ;; resume first, so a paused node isn't mistaken for down
+                (c/on node
+                  (c/exec :sh :-c "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -CONT 2>/dev/null; true"))
+                (let [up? (try (c/on node (c/exec :curl :-sf "http://localhost:2480/api/v1/ready")) true
+                               (catch Exception _ false))]
+                  (when-not up?
+                    (c/on node (db/start! (:db test) test node))))
+                (catch Exception e
+                  (info "heal-all on" node "failed:" (.getMessage e)))))
+            (assoc op :value :healed-all))
+
           ;; Default: ignore unknown ops (e.g. during setup/teardown)
           (assoc op :value :ignored)))
 
