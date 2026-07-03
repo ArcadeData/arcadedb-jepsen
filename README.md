@@ -6,7 +6,7 @@ Verifies correctness of ArcadeDB's Raft-based high availability under network pa
 
 ## Results
 
-Tested against the `apache-ratis` branch, 5-node cluster, 90-second runs, `--read-consistency read_your_writes` (default).
+Tested against ArcadeDB's `main` branch, 5-node cluster, 90-second runs, `--read-consistency read_your_writes` (default).
 
 Each test uses a fresh Docker cluster to eliminate cross-test state contamination.
 
@@ -174,9 +174,10 @@ In **linearizable mode** (recommended for Jepsen testing), the leader verifies i
 
 The test cluster runs in Docker: 5 Debian nodes (n1-n5) + 1 control node with Leiningen.
 
-### 1. Build ArcadeDB
+### 1. Build (or Fetch) ArcadeDB
 
-Build ArcadeDB from the `apache-ratis` branch and copy the distribution:
+Either build ArcadeDB from `main` and copy the distribution, or fetch a
+prebuilt copy from ArcadeDB's Docker image -- no local Maven build required:
 
 ```bash
 # Option A: Build from source (takes a few minutes)
@@ -184,6 +185,9 @@ Build ArcadeDB from the `apache-ratis` branch and copy the distribution:
 
 # Option B: Skip build, just copy an existing build
 ./build-local.sh /path/to/arcadedb --skip-build
+
+# Option C: Fetch a prebuilt copy from arcadedata/arcadedb:latest (tracks main)
+./fetch-arcadedb-image.sh
 ```
 
 ### 2. Start the Docker Cluster
@@ -253,6 +257,15 @@ These scripts sweep the test matrix:
 
 All three default to a 90s time-limit per test. Partition / all / all+lazyfs variants are shortened to 30s to keep Knossos analysis tractable.
 
+## Continuous Integration
+
+`.github/workflows/jepsen.yml` runs the full sweep automatically:
+- **Scheduled**: daily at 03:00 UTC, running all four batch scripts (`suite=all`, ~50 tests total) against `arcadedata/arcadedb:latest` (tracks `main`).
+- **Manual**: trigger via the Actions tab (`workflow_dispatch`), choosing `suite` (`all`, `baseline`, `follower`, `lazyfs`, `ha-convergence`) and a `time-limit`.
+
+Results are uploaded as a `jepsen-store-<run-id>` artifact (the `store/`
+directory) and summarized in the run's step summary.
+
 ## Running Against a Released Version (No Build Required)
 
 To test a released ArcadeDB version (downloaded from GitHub):
@@ -264,7 +277,7 @@ docker exec jepsen-control sh -c 'cd /jepsen && lein run test \
   --username root --password root'
 ```
 
-Note: released versions before the `apache-ratis` branch do not have Ratis HA, so HA-specific tests won't apply.
+Note: released versions before Ratis HA landed on `main` do not have HA support, so HA-specific tests won't apply.
 
 ## CLI Options
 

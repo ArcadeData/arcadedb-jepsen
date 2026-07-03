@@ -13,7 +13,7 @@ Written in Clojure, using the Jepsen framework (v0.3.11).
 ### Prerequisites
 - Docker (for the 5-node test cluster)
 - Leiningen (`brew install leiningen`)
-- A local ArcadeDB build (from the `apache-ratis` branch)
+- A local ArcadeDB build (from `main`) — or none at all if using the CI workflow, which fetches `arcadedata/arcadedb:latest` automatically
 
 ### Quick Start
 
@@ -62,6 +62,8 @@ run-all-tests.sh         - 34-test baseline sweep (20 leader + 14 follower)
 run-follower-tests.sh    - 14-test follower-read sweep (2 workloads × 7 nemeses)
 run-lazyfs-tests.sh      - 10-test LazyFS power-loss sweep (5 workloads × 2 nemeses)
 run-ha-convergence-tests.sh - 6-test replica-health sweep (ha-convergence × 6 nemeses)
+fetch-arcadedb-image.sh  - Repackages arcadedata/arcadedb:latest as dist/arcadedb.tar.gz (for CI)
+docker/ci-run-suite.sh   - CI-only wrapper: exits non-zero if a run-*-tests.sh sweep reports failures
 ```
 
 ## Workloads
@@ -98,6 +100,11 @@ LazyFS is **a nemesis, not a workload** — any of the workloads above can run u
 Combined baseline: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-loss). The ha-convergence sweep is a separate replica-health regression guard.
 
 > The 34-test baseline runs in default (development) mode where ArcadeDB does NOT call `fsync()` — it verifies replication and consensus, not on-disk durability. Only the LazyFS sweep runs with production-mode fsync. Flag this nuance if asked about durability guarantees.
+
+- `./fetch-arcadedb-image.sh [image]` — pulls an ArcadeDB Docker image (default `arcadedata/arcadedb:latest`, which tracks `main`) and repackages it as `dist/arcadedb.tar.gz`, for use with `--local-dist`. Used by the scheduled CI workflow; equally usable locally as an alternative to `build-local.sh`.
+- `docker/ci-run-suite.sh <script> [args...]` — CI-only wrapper that runs a `run-*-tests.sh` sweep and turns its `FINAL RESULTS` summary line into a process exit code, without modifying the sweep scripts themselves. Used by `.github/workflows/jepsen.yml`; not needed for local interactive use.
+
+A GitHub Actions workflow (`.github/workflows/jepsen.yml`) runs the full sweep (or a chosen subset) daily at 03:00 UTC against `arcadedata/arcadedb:latest`, and on demand via `workflow_dispatch`.
 
 ## Code Guidelines
 
