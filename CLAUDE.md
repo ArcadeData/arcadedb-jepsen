@@ -106,6 +106,11 @@ Combined baseline: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-los
 
 A GitHub Actions workflow (`.github/workflows/jepsen.yml`) runs the full sweep (or a chosen subset) daily at 03:00 UTC against `arcadedata/arcadedb:latest`, and on demand via `workflow_dispatch`.
 
+## Dependency Updates
+
+- `.github/dependabot.yml` covers the `github-actions` (workflow files) and `docker` (`docker/Dockerfile.node`, `docker/Dockerfile.control`) ecosystems, weekly.
+- Dependabot has no native Leiningen/Clojure ecosystem, so `project.clj` is instead covered by `.github/workflows/clojure-deps.yml`: a weekly job that runs [antq](https://github.com/liquidz/antq) with `--upgrade --force`, verifies the bumped project still compiles (`lein check`), and opens a PR only if both succeed.
+
 ## Code Guidelines
 
 - All code is Clojure (not Java)
