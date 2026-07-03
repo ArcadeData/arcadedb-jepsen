@@ -1,0 +1,112 @@
+name: Jepsen
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Which suite to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - baseline
+          - follower
+          - lazyfs
+          - ha-convergence
+      time-limit:
+        description: 'Time limit per test, in seconds'
+        required: true
+        default: '90'
+
+permissions:
+  contents: read
+
+jobs:
+  jepsen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch latest ArcadeDB build (main branch, via Docker image)
+        run: ./fetch-arcadedb-image.sh
+
+      - name: Build and start the Docker cluster
+        working-directory: docker
+        run: |
+          docker compose build
+          docker compose up -d
+
+      - name: Set up SSH between control and nodes
+        run: docker exec jepsen-control sh /jepsen/docker/setup-ssh.sh
+
+      - name: Run Jepsen suite
+        shell: bash
+        run: |
+          set +e
+          SUITE="${{ github.event.inputs.suite || 'all' }}"
+          TIME_LIMIT="${{ github.event.inputs['time-limit'] || '90' }}"
+          OVERALL=0
+          LOG=jepsen-run.log
+          : > "$LOG"
+
+          run_one() {
+            docker/ci-run-suite.sh "./$1" "$TIME_LIMIT" 2>&1 | tee -a "$LOG"
+            return "${PIPESTATUS[0]}"
+          }
+
+          case "$SUITE" in
+            baseline)
+              run_one run-all-tests.sh || OVERALL=1
+              ;;
+            follower)
+              run_one run-follower-tests.sh || OVERALL=1
+              ;;
+            lazyfs)
+              run_one run-lazyfs-tests.sh || OVERALL=1
+              ;;
+            ha-convergence)
+              run_one run-ha-convergence-tests.sh || OVERALL=1
+              ;;
+            all)
+              run_one run-all-tests.sh || OVERALL=1
+              run_one run-follower-tests.sh || OVERALL=1
+              run_one run-lazyfs-tests.sh || OVERALL=1
+              run_one run-ha-convergence-tests.sh || OVERALL=1
+              ;;
+            *)
+              echo "Unknown suite: $SUITE"
+              OVERALL=1
+              ;;
+          esac
+
+          {
+            echo "## Jepsen suite: $SUITE"
+            echo '```'
+            grep -E 'FINAL RESULTS|^  \[(PASS|FAIL|UNKNOWN)\]' "$LOG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit $OVERALL
+
+      - name: Collect Jepsen store
+        if: always()
+        run: docker cp jepsen-control:/jepsen/store ./store || true
+
+      - name: Upload Jepsen store artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jepsen-store-${{ github.run_id }}
+          path: store
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Tear down the Docker cluster
+        if: always()
+        working-directory: docker
+        run: docker compose down -v
