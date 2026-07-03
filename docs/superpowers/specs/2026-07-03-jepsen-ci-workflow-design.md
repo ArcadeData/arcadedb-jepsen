@@ -88,11 +88,12 @@ across all four scripts (~50 tests) can run several hours.
 2. Run `fetch-arcadedb-image.sh` to produce `dist/arcadedb.tar.gz`.
 3. `docker compose build` then `docker compose up -d` (in `docker/`).
 4. `docker exec jepsen-control sh /jepsen/docker/setup-ssh.sh`.
-5. Run the suite selected by `suite` (or all four, for scheduled runs):
-   - `baseline` → `run-all-tests.sh $TIME_LIMIT`
-   - `follower` → `run-follower-tests.sh $TIME_LIMIT`
-   - `lazyfs` → `run-lazyfs-tests.sh $TIME_LIMIT`
-   - `ha-convergence` → `run-ha-convergence-tests.sh $TIME_LIMIT`
+5. Run the suite selected by `suite` (or all four, for scheduled runs) via
+   the `docker/ci-run-suite.sh` wrapper (§3), from the repo root:
+   - `baseline` → `docker/ci-run-suite.sh ./run-all-tests.sh $TIME_LIMIT`
+   - `follower` → `docker/ci-run-suite.sh ./run-follower-tests.sh $TIME_LIMIT`
+   - `lazyfs` → `docker/ci-run-suite.sh ./run-lazyfs-tests.sh $TIME_LIMIT`
+   - `ha-convergence` → `docker/ci-run-suite.sh ./run-ha-convergence-tests.sh $TIME_LIMIT`
    - `all` → all four, sequentially
 6. Copy `store/` out of the control container (`docker cp jepsen-control:/jepsen/store ./store`) and upload as a workflow artifact — always, even on failure — so a failing run's Jepsen history/analysis is inspectable afterward.
 7. Append a PASS/FAIL/UNKNOWN summary to `$GITHUB_STEP_SUMMARY`.
@@ -103,33 +104,65 @@ Scheduled (cron) runs always use `suite=all` and the default 90s time limit;
 manual dispatch lets a developer pick a narrower/faster suite for a quick
 check.
 
-When `suite=all` runs the four scripts sequentially in one step, an early
-script's non-zero exit (once the fix in §3 lands) must not skip the
-remaining scripts — the step tracks failure across all four and exits
-non-zero only at the end, e.g.:
+When `suite=all` runs the four scripts sequentially (each through the
+`ci-run-suite.sh` wrapper) in one step, an early wrapper's non-zero exit
+must not skip the remaining scripts — the step tracks failure across all
+four and exits non-zero only at the end, e.g.:
 
 ```bash
 OVERALL=0
-./run-all-tests.sh "$TIME_LIMIT" || OVERALL=1
-./run-follower-tests.sh "$TIME_LIMIT" || OVERALL=1
-./run-lazyfs-tests.sh "$TIME_LIMIT" || OVERALL=1
-./run-ha-convergence-tests.sh "$TIME_LIMIT" || OVERALL=1
+docker/ci-run-suite.sh ./run-all-tests.sh "$TIME_LIMIT" || OVERALL=1
+docker/ci-run-suite.sh ./run-follower-tests.sh "$TIME_LIMIT" || OVERALL=1
+docker/ci-run-suite.sh ./run-lazyfs-tests.sh "$TIME_LIMIT" || OVERALL=1
+docker/ci-run-suite.sh ./run-ha-convergence-tests.sh "$TIME_LIMIT" || OVERALL=1
 exit $OVERALL
 ```
 
-### 3. Required fix: `run-*-tests.sh` must exit non-zero on failure
+### 3. Required fix: detect failures without modifying the sweep scripts
 
 Today, none of the four sweep scripts (`run-all-tests.sh`,
 `run-follower-tests.sh`, `run-lazyfs-tests.sh`,
 `run-ha-convergence-tests.sh`) exit with a non-zero status when `FAIL>0` —
 they only print a results table and implicitly return 0. Run under CI as-is,
-the job would always report green regardless of actual test outcomes. Each
-script gets one line added at the end:
+the job would always report green regardless of actual test outcomes.
+
+`CLAUDE.md` explicitly marks `run-all-tests.sh` **"Do not modify: used by
+the reported 34/34 pass"** — so rather than editing any of the four scripts,
+a new CI-only wrapper, `docker/ci-run-suite.sh`, invokes the requested
+script, captures its stdout, and parses the "FINAL RESULTS (N passed, M
+failed/unknown)" line each script already prints at the end. The wrapper
+exits non-zero if `M>0`, and non-zero (with a clear error) if that line
+never appears (e.g. the script crashed before finishing). This keeps all
+four sweep scripts byte-for-byte unmodified.
 
 ```bash
-[ "$FAIL" -gt 0 ] && exit 1
+#!/bin/bash
+# CI-only wrapper: runs one of the run-*-tests.sh sweep scripts (path given by
+# the caller, resolved relative to CWD same as any shell command), parses its
+# "FINAL RESULTS (N passed, M failed/unknown)" summary line, and exits non-zero
+# if any test failed. Never modifies the underlying scripts.
+set -uo pipefail
+SCRIPT="$1"; shift
+
+OUTPUT=$("$SCRIPT" "$@" 2>&1)
+echo "$OUTPUT"
+
+SUMMARY=$(echo "$OUTPUT" | grep -o 'FINAL RESULTS ([0-9]* passed, [0-9]* failed/unknown)' | tail -1)
+if [ -z "$SUMMARY" ]; then
+  echo "ci-run-suite.sh: no FINAL RESULTS summary found in $SCRIPT output — treating as failure"
+  exit 1
+fi
+
+FAILED=$(echo "$SUMMARY" | grep -o '[0-9]* failed/unknown' | grep -o '^[0-9]*')
+if [ "$FAILED" -gt 0 ]; then
+  echo "ci-run-suite.sh: $SCRIPT reported $FAILED failed/unknown test(s)"
+  exit 1
+fi
 exit 0
 ```
+
+The CI workflow calls it as `docker/ci-run-suite.sh ./run-all-tests.sh 90`
+etc. from the repo root.
 
 ### 4. Doc updates
 
@@ -159,6 +192,7 @@ other batch runners.
   and a short `time-limit` (e.g. 30s) before relying on the nightly cron,
   to confirm the end-to-end pipeline (image fetch → cluster up → tests →
   artifact upload → summary → teardown) works in CI.
-- Deliberately break one script's exit-code fix (or introduce a failing
-  assertion) to confirm the job actually goes red — don't just trust the
-  code, observe a real failing run before considering this done.
+- Deliberately feed `ci-run-suite.sh` a script whose output has no "FINAL
+  RESULTS" line, and separately one with `failed/unknown > 0`, to confirm
+  it exits non-zero in both cases — don't just trust the code, observe it
+  fail before considering this done.
