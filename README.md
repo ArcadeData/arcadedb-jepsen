@@ -260,7 +260,7 @@ All three default to a 90s time-limit per test. Partition / all / all+lazyfs var
 ## Continuous Integration
 
 `.github/workflows/jepsen.yml` runs the full sweep automatically:
-- **Scheduled**: daily at 03:00 UTC, running all four batch scripts (`suite=all`, ~50 tests total) against `arcadedata/arcadedb:latest` (tracks `main`).
+- **Scheduled**: daily at 03:00 UTC, running all four batch scripts (`suite=all`, ~64 tests total) against `arcadedata/arcadedb:latest` (tracks `main`).
 - **Manual**: trigger via the Actions tab (`workflow_dispatch`), choosing `suite` (`all`, `baseline`, `follower`, `lazyfs`, `ha-convergence`) and a `time-limit`.
 
 Results are uploaded as a `jepsen-store-<run-id>` artifact (the `store/`
