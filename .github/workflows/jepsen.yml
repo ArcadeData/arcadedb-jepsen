@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 360
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Fetch latest ArcadeDB build (main branch, via Docker image)
         run: ./fetch-arcadedb-image.sh
