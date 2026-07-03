@@ -15,7 +15,7 @@ WORKDIR="$(mktemp -d)"
 
 cleanup() {
   [ -n "${CID:-}" ] && docker rm -f "$CID" >/dev/null 2>&1
-  rm -rf "$WORKDIR"
+  [ -n "${WORKDIR:-}" ] && rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
 
@@ -23,7 +23,7 @@ echo "Pulling $IMAGE..."
 docker pull "$IMAGE"
 
 CID=$(docker create "$IMAGE")
-docker cp "$CID:/home/arcadedb/." "$WORKDIR/arcadedb"
+docker cp "$CID:/home/arcadedb" "$WORKDIR/"
 
 mkdir -p "$SCRIPT_DIR/dist"
 tar czf "$SCRIPT_DIR/dist/arcadedb.tar.gz" -C "$WORKDIR" arcadedb

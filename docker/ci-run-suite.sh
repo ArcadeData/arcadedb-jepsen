@@ -10,19 +10,23 @@
 
 set -uo pipefail
 
-SCRIPT="$1"
+SCRIPT="${1:-}"
+if [ -z "$SCRIPT" ] || [ ! -x "$SCRIPT" ]; then
+  echo "ci-run-suite.sh: SCRIPT is empty or not executable: '$SCRIPT'" >&2
+  exit 1
+fi
 shift
 
 OUTPUT=$("$SCRIPT" "$@" 2>&1)
 echo "$OUTPUT"
 
-SUMMARY=$(echo "$OUTPUT" | grep -o 'FINAL RESULTS ([0-9]\+ passed, [0-9]\+ failed/unknown)' | tail -1)
+SUMMARY=$(echo "$OUTPUT" | grep -E -o 'FINAL RESULTS \([0-9]+ passed, [0-9]+ failed/unknown\)' | tail -1)
 if [ -z "$SUMMARY" ]; then
   echo "ci-run-suite.sh: no FINAL RESULTS summary found in $SCRIPT output -- treating as failure"
   exit 1
 fi
 
-FAILED_COUNT=$(echo "$SUMMARY" | grep -o '[0-9]\+ failed/unknown' | grep -o '^[0-9]\+')
+FAILED_COUNT=$(echo "$SUMMARY" | grep -E -o '[0-9]+ failed/unknown' | grep -E -o '^[0-9]+')
 if [ "$FAILED_COUNT" -gt 0 ]; then
   echo "ci-run-suite.sh: $SCRIPT reported $FAILED_COUNT failed/unknown test(s)"
   exit 1

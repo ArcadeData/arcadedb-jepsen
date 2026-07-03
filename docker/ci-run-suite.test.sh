@@ -11,7 +11,7 @@ CI_RUN_SUITE="$SCRIPT_DIR/ci-run-suite.sh"
 FIXTURE_DIR="$(mktemp -d)"
 FAILED=0
 
-cleanup() { rm -rf "$FIXTURE_DIR"; }
+cleanup() { [ -n "${FIXTURE_DIR:-}" ] && rm -rf "$FIXTURE_DIR"; }
 trap cleanup EXIT
 
 assert_exit() {
