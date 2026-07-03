@@ -47,7 +47,7 @@ jobs:
         run: |
           set +e
           SUITE="${{ github.event.inputs.suite || 'all' }}"
-          TIME_LIMIT="${{ github.event.inputs.time-limit || '90' }}"
+          TIME_LIMIT="${{ github.event.inputs['time-limit'] || '90' }}"
           OVERALL=0
           LOG=jepsen-run.log
           : > "$LOG"
