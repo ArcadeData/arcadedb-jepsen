@@ -38,7 +38,7 @@ jobs:
             ${{ runner.os }}-m2-
 
       - name: Check for outdated dependencies and upgrade project.clj
-        run: clojure -Sdeps '{:deps {com.github.liquidz/antq {:mvn/version "RELEASE"}}}' -M -m antq.core --upgrade --force
+        run: clojure -Sdeps '{:deps {com.github.liquidz/antq {:mvn/version "RELEASE"}}}' -M -m antq.core --upgrade --force --skip=github-action
 
       - name: Detect changes
         id: diff
@@ -57,6 +57,7 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
+          add-paths: project.clj
           commit-message: 'Bump Clojure dependencies via antq'
           title: 'Bump Clojure dependencies'
           body: |
