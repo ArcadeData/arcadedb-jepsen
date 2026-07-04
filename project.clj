@@ -3,12 +3,12 @@
   :url "https://github.com/ArcadeData/arcadedb-jepsen"
   :license {:name "Apache-2.0"
             :url  "https://www.apache.org/licenses/LICENSE-2.0"}
-  :dependencies [[org.clojure/clojure "1.12.0"]
+  :dependencies [[org.clojure/clojure "1.12.5"]
                  [jepsen "0.3.11"]
-                 [cheshire "5.13.0"]]
+                 [cheshire "6.2.0"]]
   :jvm-opts ["-Djava.awt.headless=true"
              "-server"
              "-Xmx16g"]
   :main arcadedb-jepsen.core
   :repl-options {:init-ns arcadedb-jepsen.core}
-  :profiles {:dev {:dependencies [[org.clojure/tools.namespace "1.5.0"]]}})
+  :profiles {:dev {:dependencies [[org.clojure/tools.namespace "1.5.1"]]}})
