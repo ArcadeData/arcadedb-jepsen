@@ -1,3 +1,5 @@
+[![Jepsen](https://github.com/ArcadeData/arcadedb-jepsen/actions/workflows/jepsen.yml/badge.svg?branch=main)](https://github.com/ArcadeData/arcadedb-jepsen/actions/workflows/jepsen.yml)
+
 # arcadedb-jepsen
 
 [Jepsen](https://jepsen.io) tests for [ArcadeDB](https://arcadedb.com), a multi-model distributed database.
