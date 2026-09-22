@@ -1,0 +1,127 @@
+# Merges a Dependabot pull request once someone has approved it.
+#
+# Ported from ArcadeData/arcadedb-drivers, which in turn ported it from ArcadeData/arcadedb. The
+# shape and rationale are unchanged; the two things adapted per repository are the path guard and
+# the CI gate, both recorded below.
+#
+# Merging from a workflow is what makes the `[skip ci]` marker in the subject work without a
+# commit-message hack. A push made with the repository's GITHUB_TOKEN starts no workflow run at all -
+# "if a workflow run pushes code using the repository's GITHUB_TOKEN, a new workflow will not run
+# even when the repository contains a workflow configured to run when push events occur" - so main's
+# push-triggered jobs stay quiet on a Dependabot merge. The marker is kept in the subject anyway: it
+# costs nothing, it says out loud what the merge is doing, and it is what would carry the behaviour
+# if this ever has to merge with a PAT or an App token instead.
+#
+# Scope note: this only ever touches PRs authored by dependabot[bot], i.e. the `github-actions` and
+# `docker` ecosystems configured in .github/dependabot.yml. The weekly Clojure dependency PR opened
+# by .github/workflows/clojure-deps.yml is authored by the actions bot, not Dependabot, so it is not
+# eligible here and still merges by hand.
+name: Dependabot auto-merge
+
+on:
+  pull_request_review:
+    types: [ submitted ]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    # arcadedb's conditions, unchanged: `author=dependabot[bot]` and `#approved-reviews-by>=1`. Note
+    # the actor here is the human who approved, not dependabot[bot], so this run gets a writable
+    # GITHUB_TOKEN rather than the read-only one Dependabot-triggered workflows get.
+    if: >-
+      github.event.review.state == 'approved' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Decide whether this PR may be merged unattended
+        id: guard
+        run: |
+          set -euo pipefail
+          gh pr view "$PR" -R "$GITHUB_REPOSITORY" \
+            --json files,mergeable,headRefOid,statusCheckRollup > pr.json
+          # Everything below is decided about ONE commit, and the merge is pinned to it. Dependabot
+          # force-pushes the same branch when a grouped update gains a member, so a group PR can
+          # acquire a guarded path - or lose a green check - in the seconds between this read and
+          # the merge. Pinning makes a head that moved fail the run instead of merging a commit the
+          # guard below never saw.
+          echo "head=$(jq -r '.headRefOid' pr.json)" >> "$GITHUB_OUTPUT"
+
+          # arcadedb guards native/pom.xml here, because its GraalVM pin has to move in lockstep
+          # with a builder JDK Dependabot cannot see. This repository's equivalent invariants are
+          # the test suite itself: the Clojure sources under src/ and the batch runners, of which
+          # run-all-tests.sh is explicitly marked "do not modify" in CLAUDE.md because the reported
+          # 34/34 baseline is defined by it. A base-image or action bump has no business editing
+          # either, so a Dependabot PR that does is not a dependency bump any more and a human
+          # should look at it before it lands.
+          GUARDED='^(src/|test/|project\.clj$|run-[^/]*-tests\.sh$)'
+          if jq -r '.files[].path' pr.json | grep -qE "$GUARDED"; then
+            echo "This PR touches the test suite (src/, test/, project.clj or a run-*-tests.sh" \
+                 "sweep). Those move by hand. Leaving it open."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$(jq -r '.mergeable' pr.json)" = "CONFLICTING" ]; then
+            echo "PR is in conflict with main. Leaving it open for Dependabot to rebase."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # "No checks at all" is treated as mergeable, not as a failure. This repository runs no
+          # pull-request-triggered CI - jepsen.yml and clojure-deps.yml are both schedule +
+          # workflow_dispatch only - so an empty rollup is the normal case here, not a symptom.
+          # Failing it closed would deadlock every Dependabot PR, since nothing re-fires this
+          # workflow once the approval is already in. The gate is kept anyway so that adding a PR
+          # workflow later is enough to make it bite, with no edit to this file.
+          FAILING=$(jq -r '
+            [ .statusCheckRollup[]?
+              | select(
+                  (.conclusion // "" | ascii_upcase
+                    | IN("FAILURE","TIMED_OUT","CANCELLED","ACTION_REQUIRED","STARTUP_FAILURE"))
+                  or (.state // "" | ascii_upcase | IN("FAILURE","ERROR"))
+                )
+              | .name // .context ] | join(", ")' pr.json)
+          if [ -n "$FAILING" ]; then
+            echo "Checks are not green ($FAILING). Leaving it open."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PENDING=$(jq -r '
+            [ .statusCheckRollup[]?
+              | select(
+                  ((.status // "" | ascii_upcase | IN("QUEUED","IN_PROGRESS","WAITING","PENDING","REQUESTED")))
+                  or (.state // "" | ascii_upcase | IN("PENDING","EXPECTED"))
+                )
+              | .name // .context ] | join(", ")' pr.json)
+          if [ -n "$PENDING" ]; then
+            echo "Checks are still running ($PENDING). Leaving it open: re-approve once they" \
+                 "finish, or merge by hand."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "merge=true" >> "$GITHUB_OUTPUT"
+
+      - name: Merge
+        if: steps.guard.outputs.merge == 'true'
+        env:
+          # Through the environment, never interpolated into the script: a pull request title is
+          # attacker-controlled text, and `${{ }}` would splice it straight into the shell.
+          TITLE: ${{ github.event.pull_request.title }}
+          # The commit the guard step inspected. Not github.event.pull_request.head.sha, which is
+          # the head as of the review and can be older still.
+          HEAD_SHA: ${{ steps.guard.outputs.head }}
+        run: |
+          set -euo pipefail
+          gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body --jq '.body' |
+            gh pr merge "$PR" -R "$GITHUB_REPOSITORY" --merge \
+              --match-head-commit "$HEAD_SHA" \
+              --subject "$TITLE (#$PR) [skip ci]" --body-file -
