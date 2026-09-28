@@ -4,7 +4,7 @@
   :license {:name "Apache-2.0"
             :url  "https://www.apache.org/licenses/LICENSE-2.0"}
   :dependencies [[org.clojure/clojure "1.12.6"]
-                 [jepsen "0.3.13"]
+                 [jepsen "0.3.14"]
                  [cheshire "6.2.0"]]
   :jvm-opts ["-Djava.awt.headless=true"
              "-server"
