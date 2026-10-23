@@ -22,7 +22,7 @@ on:
         default: '90'
 
 permissions:
-  contents: read
+  contents: write # push the results badge to the 'badges' branch
   checks: write
 
 jobs:
@@ -121,6 +121,27 @@ jobs:
           list-suites: "failed"
           reporter: java-junit
           fail-on-empty: false
+
+      # README badge: a shields.io endpoint JSON force-pushed as the only commit of the orphan
+      # 'badges' branch. Only full-suite runs on main update it, so a manual subset run never
+      # overwrites the headline numbers.
+      - name: Publish results badge
+        if: (success() || failure()) && github.ref == 'refs/heads/main' && (github.event.inputs.suite || 'all') == 'all'
+        continue-on-error: true
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          mkdir -p badge-branch
+          python3 docker/jepsen-junit-badge.py badge-branch/jepsen.json jepsen-reports/TEST*.xml
+          cd badge-branch
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jepsen.json
+          git commit -q -m "Jepsen results badge (run ${{ github.run_id }})"
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" badges
 
       # Jepsen names store directories with ISO timestamps (containing ':'), which
       # upload-artifact rejects, so the store is shipped as a tarball.

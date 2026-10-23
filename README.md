@@ -1,4 +1,5 @@
 [![Jepsen](https://github.com/ArcadeData/arcadedb-jepsen/actions/workflows/jepsen.yml/badge.svg?branch=main)](https://github.com/ArcadeData/arcadedb-jepsen/actions/workflows/jepsen.yml)
+[![Jepsen tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FArcadeData%2Farcadedb-jepsen%2Fbadges%2Fjepsen.json)](https://github.com/ArcadeData/arcadedb-jepsen/actions/workflows/jepsen.yml)
 
 # arcadedb-jepsen
 
