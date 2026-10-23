@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
   jepsen:
@@ -53,30 +54,33 @@ jobs:
           OVERALL=0
           LOG=jepsen-run.log
           : > "$LOG"
+          mkdir -p jepsen-logs
 
+          # $1 = sweep script, $2 = suite name (also names the per-suite log
+          # that the JUnit conversion step reads).
           run_one() {
-            docker/ci-run-suite.sh "./$1" "$TIME_LIMIT" 2>&1 | tee -a "$LOG"
+            docker/ci-run-suite.sh "./$1" "$TIME_LIMIT" 2>&1 | tee -a "$LOG" "jepsen-logs/$2.log"
             return "${PIPESTATUS[0]}"
           }
 
           case "$SUITE" in
             baseline)
-              run_one run-all-tests.sh || OVERALL=1
+              run_one run-all-tests.sh baseline || OVERALL=1
               ;;
             follower)
-              run_one run-follower-tests.sh || OVERALL=1
+              run_one run-follower-tests.sh follower || OVERALL=1
               ;;
             lazyfs)
-              run_one run-lazyfs-tests.sh || OVERALL=1
+              run_one run-lazyfs-tests.sh lazyfs || OVERALL=1
               ;;
             ha-convergence)
-              run_one run-ha-convergence-tests.sh || OVERALL=1
+              run_one run-ha-convergence-tests.sh ha-convergence || OVERALL=1
               ;;
             all)
-              run_one run-all-tests.sh || OVERALL=1
-              run_one run-follower-tests.sh || OVERALL=1
-              run_one run-lazyfs-tests.sh || OVERALL=1
-              run_one run-ha-convergence-tests.sh || OVERALL=1
+              run_one run-all-tests.sh baseline || OVERALL=1
+              run_one run-follower-tests.sh follower || OVERALL=1
+              run_one run-lazyfs-tests.sh lazyfs || OVERALL=1
+              run_one run-ha-convergence-tests.sh ha-convergence || OVERALL=1
               ;;
             *)
               echo "Unknown suite: $SUITE"
@@ -93,6 +97,31 @@ jobs:
 
           exit $OVERALL
 
+      - name: Convert Jepsen results to JUnit XML
+        if: success() || failure()
+        shell: bash
+        run: |
+          mkdir -p jepsen-reports
+          for log in jepsen-logs/*.log; do
+            [ -e "$log" ] || continue
+            suite=$(basename "$log" .log)
+            python3 docker/jepsen-log-to-junit.py "$suite" "$log" "jepsen-reports/TEST-jepsen-$suite.xml"
+          done
+
+      # The "Run Jepsen suite" step decides the job; the reporter only renders the check run and
+      # is allowed to fail (e.g. missing checks permission) without turning the job red.
+      - name: Jepsen Tests Reporter
+        uses: dorny/test-reporter@d1b5dff021aa968b288b02285a8bf47471c5928a # v3.2.0
+        continue-on-error: true
+        if: success() || failure()
+        with:
+          name: Jepsen Tests Report (${{ github.event.inputs.suite || 'all' }})
+          path: "jepsen-reports/TEST*.xml"
+          list-tests: "failed"
+          list-suites: "failed"
+          reporter: java-junit
+          fail-on-empty: false
+
       - name: Collect Jepsen store
         if: always()
         run: docker cp jepsen-control:/jepsen/store ./store || true
@@ -102,7 +131,10 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jepsen-store-${{ github.run_id }}
-          path: store
+          path: |
+            store
+            jepsen-logs
+            jepsen-reports
           if-no-files-found: warn
           retention-days: 14
 
