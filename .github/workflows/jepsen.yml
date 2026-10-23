@@ -122,9 +122,13 @@ jobs:
           reporter: java-junit
           fail-on-empty: false
 
+      # Jepsen names store directories with ISO timestamps (containing ':'), which
+      # upload-artifact rejects, so the store is shipped as a tarball.
       - name: Collect Jepsen store
         if: always()
-        run: docker cp jepsen-control:/jepsen/store ./store || true
+        run: |
+          docker cp jepsen-control:/jepsen/store ./store || true
+          if [ -d store ]; then tar -czf jepsen-store.tar.gz store; fi
 
       - name: Upload Jepsen store artifact
         if: always()
@@ -132,7 +136,7 @@ jobs:
         with:
           name: jepsen-store-${{ github.run_id }}
           path: |
-            store
+            jepsen-store.tar.gz
             jepsen-logs
             jepsen-reports
           if-no-files-found: warn
