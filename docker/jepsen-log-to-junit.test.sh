@@ -85,6 +85,24 @@ assert_xpath "UNKNOWN failure type" "root[2].find('failure').get('type')" UNKNOW
 assert_xpath "failure body includes test output" "'Analysis invalid' in root[1].find('failure').text" True
 assert_xpath "incomplete test body includes test output" "'crashed half way' in root[3].find('error').text" True
 
+# The badge summariser sums the report: 1 pass out of 4 tests.
+BADGE=$(python3 "$SCRIPT_DIR/jepsen-junit-badge.py" "$FIXTURE_DIR/badge.json" "$FIXTURE_DIR/report.xml" >/dev/null \
+  && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["message"], d["color"])' "$FIXTURE_DIR/badge.json")
+if [ "$BADGE" != "1/4 passed red" ]; then
+  echo "FAIL: badge summarises the report (expected '1/4 passed red', got '$BADGE')"
+  FAILED=1
+else
+  echo "PASS: badge summarises the report"
+fi
+python3 "$SCRIPT_DIR/jepsen-junit-badge.py" "$FIXTURE_DIR/empty.json" >/dev/null
+BADGE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["message"])' "$FIXTURE_DIR/empty.json")
+if [ "$BADGE" != "no results" ]; then
+  echo "FAIL: badge with no reports (expected 'no results', got '$BADGE')"
+  FAILED=1
+else
+  echo "PASS: badge with no reports says no results"
+fi
+
 if [ "$FAILED" -ne 0 ]; then
   echo "jepsen-log-to-junit.py tests: FAILED"
   exit 1
