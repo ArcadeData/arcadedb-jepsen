@@ -64,6 +64,7 @@ run-lazyfs-tests.sh      - 10-test LazyFS power-loss sweep (5 workloads × 2 nem
 run-ha-convergence-tests.sh - 6-test replica-health sweep (ha-convergence × 6 nemeses)
 fetch-arcadedb-image.sh  - Repackages arcadedata/arcadedb:latest as dist/arcadedb.tar.gz (for CI)
 docker/ci-run-suite.sh   - CI-only wrapper: exits non-zero if a run-*-tests.sh sweep reports failures
+docker/jepsen-log-to-junit.py - CI-only: converts a sweep's console log into JUnit XML (one testcase per run)
 ```
 
 ## Workloads
@@ -103,6 +104,7 @@ Combined baseline: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-los
 
 - `./fetch-arcadedb-image.sh [image]` — pulls an ArcadeDB Docker image (default `arcadedata/arcadedb:latest`, which tracks `main`) and repackages it as `dist/arcadedb.tar.gz`, for use with `--local-dist`. Used by the scheduled CI workflow; equally usable locally as an alternative to `build-local.sh`.
 - `docker/ci-run-suite.sh <script> [args...]` — CI-only wrapper that runs a `run-*-tests.sh` sweep and turns its `FINAL RESULTS` summary line into a process exit code, without modifying the sweep scripts themselves. Used by `.github/workflows/jepsen.yml`; not needed for local interactive use.
+- `docker/jepsen-log-to-junit.py <suite> <log> <out.xml>` — parses the `TEST i/N:` / `Result:` blocks a sweep prints and writes a JUnit report (FAIL/UNKNOWN → `<failure>` with the `:valid?` verdict and output tail; a block with no `Result:` → `<error>`). The workflow tees each sweep to `jepsen-logs/<suite>.log`, converts to `jepsen-reports/TEST-jepsen-<suite>.xml`, and renders them with `dorny/test-reporter` (same pinned version as the arcadedb repo). Fixture tests: `docker/jepsen-log-to-junit.test.sh`.
 
 A GitHub Actions workflow (`.github/workflows/jepsen.yml`) runs the full sweep (or a chosen subset) daily at 03:00 UTC against `arcadedata/arcadedb:latest`, and on demand via `workflow_dispatch`.
 
