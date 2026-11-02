@@ -95,7 +95,7 @@ LazyFS is **a nemesis, not a workload** — any of the workloads above can run u
 
 - `./run-all-tests.sh [time-limit]` — 34-test baseline sweep. **Do not modify**: used by the reported 34/34 pass.
 - `./run-follower-tests.sh [time-limit]` — 14-test follower-read sweep. Always sets `--read-consistency linearizable` so the follower paths are exercised. Shortens partition/all variants to 30s.
-- `./run-lazyfs-tests.sh [time-limit]` — 10-test LazyFS power-loss sweep (5 workloads × {`lazyfs`, `all+lazyfs`}). Auto-enables production mode; `all+lazyfs` runs are shortened to 30s.
+- `./run-lazyfs-tests.sh [time-limit]` — 10-test LazyFS power-loss sweep (5 workloads × {`lazyfs`, `all+lazyfs`}). Auto-enables production mode; `all+lazyfs` runs and every `register*` run are shortened to 30s (Knossos blows up on the indeterminate ops a power loss leaves behind).
 - `./run-ha-convergence-tests.sh [time-limit]` — 6-test replica-health sweep (ha-convergence × {none, partition, kill, pause, all, all+lazyfs}). After each run heals + settles, reads every node directly and checks liveness/convergence/completeness (targets #4740 phase-2 divergence + #4728 stalled-replica recovery). `all+lazyfs` runs in production mode at 30s.
 
 Combined baseline: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-loss). The ha-convergence sweep is a separate replica-health regression guard.
@@ -107,7 +107,9 @@ Combined baseline: **44/44 PASS** (20 leader + 14 follower + 10 LazyFS power-los
 - `docker/jepsen-log-to-junit.py <suite> <log> <out.xml>` — parses the `TEST i/N:` / `Result:` blocks a sweep prints and writes a JUnit report (FAIL/UNKNOWN → `<failure>` with the `:valid?` verdict and output tail; a block with no `Result:` → `<error>`). The workflow tees each sweep to `jepsen-logs/<suite>.log`, converts to `jepsen-reports/TEST-jepsen-<suite>.xml`, and renders them with `dorny/test-reporter` (same pinned version as the arcadedb repo). Fixture tests: `docker/jepsen-log-to-junit.test.sh`.
 - `docker/jepsen-junit-badge.py <out.json> <junit-xml>...` — sums the JUnit reports into a shields.io endpoint JSON (`N/M passed`). Full-suite runs on `main` force-push it as the only commit of the orphan `badges` branch; the README badge reads `badges/jepsen.json` from there.
 
-A GitHub Actions workflow (`.github/workflows/jepsen.yml`) runs the full sweep (or a chosen subset) daily at 03:00 UTC against `arcadedata/arcadedb:latest`, and on demand via `workflow_dispatch`.
+ArcadeDB server console output is appended to `/opt/arcadedb/log/console.log` on each node (across restarts) and collected into the Jepsen store per node. The bank workload logs the raw server response to `jepsen.log` whenever a balance read does not return 5 rows with `acctId`.
+
+A GitHub Actions workflow (`.github/workflows/jepsen.yml`) runs the full sweep (`suite=all` = baseline + lazyfs + ha-convergence, 50 tests; the follower tests are already part of the baseline) or a chosen subset daily at 03:00 UTC against `arcadedata/arcadedb:latest`, and on demand via `workflow_dispatch`.
 
 ## Dependency Updates
 

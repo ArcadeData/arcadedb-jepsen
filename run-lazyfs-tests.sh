@@ -40,8 +40,10 @@ for WORKLOAD in "${WORKLOADS[@]}"; do
     # combined runs short. register-follower is a Knossos (linearizable) workload, and
     # the post-power-loss leaderless window produces many indeterminate ops that blow up
     # the analysis (90s register-follower/lazyfs returned :unknown) -- shorten both of
-    # its lazyfs variants to 30s as well.
-    if [[ "$NEMESIS" == "all+lazyfs" || "$WORKLOAD" == "register-follower" ]]; then
+    # its lazyfs variants to 30s as well. register/lazyfs hit the same blow-up in CI
+    # (Knossos ran 21 min on a 90s history and never reached a verdict), so it gets the
+    # same cap.
+    if [[ "$NEMESIS" == "all+lazyfs" || "$WORKLOAD" == register* ]]; then
       TL=30
     else
       TL=$TIME_LIMIT

@@ -44,8 +44,15 @@
   "Reads all account balances. Returns a map of {acctId balance}."
   [client]
   (let [result (ac/command! client "sql"
-                            "SELECT acctId, balance FROM Account ORDER BY acctId")]
-    (->> (get-in result [:result])
+                            "SELECT acctId, balance FROM Account ORDER BY acctId")
+        rows   (get-in result [:result])]
+    ;; The checker only sees the {acctId balance} map; keep the raw server response in
+    ;; jepsen.log when it does not look like the expected rows, so a bad read can be
+    ;; diagnosed (e.g. rows without acctId after a leader power loss).
+    (when (or (not= account-count (count rows))
+              (some (comp nil? :acctId) rows))
+      (warn "Unexpected balance read on" (:base-url client) "- raw response:" (pr-str result)))
+    (->> rows
          (map (fn [row] [(:acctId row) (:balance row)]))
          (into (sorted-map)))))
 

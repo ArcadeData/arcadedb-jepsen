@@ -21,7 +21,10 @@
 ;; This is the directory that must be on LazyFS for power-loss tests to actually exercise
 ;; Ratis's durability path.
 (def raft-dir "/opt/arcadedb/ratis-storage")
-(def log-file "/opt/arcadedb/log/arcadedb.log")
+;; Server console output (stdout+stderr), appended across restarts so a test that
+;; power-kills and restarts a node keeps the whole story in one file. ArcadeDB's own
+;; FileHandler writes log/arcadedb.log.N and rotates on every start, so it is not used.
+(def log-file "/opt/arcadedb/log/console.log")
 (def config-dir "/opt/arcadedb/config")
 (def local-dist-path "/jepsen/dist/arcadedb.tar.gz")
 
@@ -233,7 +236,8 @@
     ;; Write start script and launch as a detached background process
     (c/exec :sh :-c (str "echo '" script "' > /tmp/start-arcadedb.sh && "
                          "chmod +x /tmp/start-arcadedb.sh && "
-                         "nohup /tmp/start-arcadedb.sh > /dev/null 2>&1 & "
+                         "mkdir -p " install-dir "/log && "
+                         "nohup /tmp/start-arcadedb.sh >> " log-file " 2>&1 & "
                          "sleep 3"))
     ;; Wait for HTTP API to become ready
     (info "Waiting for ArcadeDB HTTP API on" node)
