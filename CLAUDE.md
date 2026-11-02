@@ -71,7 +71,7 @@ docker/jepsen-log-to-junit.py - CI-only: converts a sweep's console log into JUn
 
 - **bank**: Creates 5 accounts with 1000 each, runs concurrent transfers, checks total balance is always 5000. Tests ACID under replication.
 - **set**: Inserts unique elements concurrently, reads all at the end, verifies no acknowledged write was lost.
-- **elle**: Multi-key read/write transactions; Elle's dependency-graph cycle detection checks for G0, G1a, G1b, G2 and lost updates.
+- **elle**: Multi-key read/write transactions; Elle's dependency-graph cycle detection checks for G0, G1a, G1b, G1c, G2, internal consistency and lost updates. Each transaction's micro-ops run in order inside one `sqlscript` REPEATABLE_READ transaction; read `i` is bound to `$ri` and returned via `RETURN {"ri": $ri, ...}`, so read values are the ones seen inside the transaction (never read after commit, which produces false G1c cycles).
 - **register**: Single-key read/write/CAS checked by Knossos for linearizability. Uses leader-routing to test the strongest consistency guarantee.
 - **register-follower**: Same as register, but READS are routed to a non-leader with `X-ArcadeDB-Read-Consistency: LINEARIZABLE` and no bookmark. Exercises the Ratis `sendReadOnly` ReadIndex path (`RaftHAServer.ensureLinearizableFollowerRead()`). Writes still go to the leader.
 - **register-bookmark**: Same as register-follower, but each write's `X-ArcadeDB-Commit-Index` response header is captured and echoed back as `X-ArcadeDB-Read-After` on subsequent reads. Tests the bookmark-wait follower path (cheaper than ReadIndex; read-your-writes for the caller, not global linearizability).
