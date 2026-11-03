@@ -7,9 +7,54 @@
             [jepsen [checker :as checker]
                     [client :as client]
                     [generator :as gen]
-                    [independent :as independent]]
+                    [independent :as independent]
+                    [store :as store]]
             [jepsen.checker.timeline :as timeline]
-            [knossos.model :as model]))
+            [knossos.linear :as linear]
+            [knossos.linear.report :as linear.report]
+            [knossos.model :as model]
+            [knossos.search :as search]))
+
+(def analysis-time-limit-ms
+  "Total Knossos search time allowed per test, across all keys. A history with many
+   indeterminate ops (crashes, partitions) can make the search run for hours; past this
+   budget the remaining keys are reported :valid? :unknown instead."
+  (* 10 60 1000))
+
+(defn bounded-linearizable
+  "Like jepsen.checker/linearizable with the :linear algorithm, but with a time budget.
+   jepsen.checker/linearizable passes no options to Knossos, and Knossos's own
+   :time-limit stops waiting without stopping the search thread, so this checker
+   aborts the search itself. The budget starts at the first key checked and is shared
+   by every key of the test (independent/checker calls this once per key)."
+  ([model] (bounded-linearizable model analysis-time-limit-ms))
+  ([model limit-ms]
+   (let [deadline (delay (+ (System/currentTimeMillis) limit-ms))]
+     (reify checker/Checker
+       (check [_ test history opts]
+         (let [remaining (- @deadline (System/currentTimeMillis))]
+           (if (pos? remaining)
+             (let [s (linear/start-analysis model history)
+                   a (try (search/run s {:time-limit remaining})
+                          (finally (search/abort! s :timeout)))]
+               (when (= :timeout (:cause a))
+                 (warn "Knossos analysis exceeded its" (quot limit-ms 1000)
+                       "s budget; reporting :unknown"))
+               (when-not (:valid? a)
+                 (try
+                   (linear.report/render-analysis!
+                     history a (.getCanonicalPath
+                                 (store/path! test (:subdirectory opts) "linear.svg")))
+                   (catch Throwable e
+                     (warn e "Error rendering linearizability analysis"))))
+               (assoc a
+                      :analyzer    :linear
+                      :final-paths (take 10 (:final-paths a))
+                      :configs     (take 10 (:configs a))))
+             {:valid? :unknown
+              :cause  :timeout
+              :error  (str "Knossos analysis budget of " (quot limit-ms 1000)
+                           "s used up by earlier keys")})))))))
 
 (defn create-schema!
   "Creates the Register type if it doesn't exist."
@@ -190,7 +235,5 @@
                   (gen/mix [r w cas])))
    :checker   (independent/checker
                 (checker/compose
-                  {:linear   (checker/linearizable
-                               {:model     (model/cas-register)
-                                :algorithm :linear})
+                  {:linear   (bounded-linearizable (model/cas-register))
                    :timeline (timeline/html)}))})
