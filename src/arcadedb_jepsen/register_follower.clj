@@ -140,7 +140,5 @@
                   (gen/mix [reg/r reg/w reg/cas])))
    :checker   (independent/checker
                 (checker/compose
-                  {:linear   (checker/linearizable
-                               {:model     (model/cas-register)
-                                :algorithm :linear})
+                  {:linear   (reg/bounded-linearizable (model/cas-register))
                    :timeline (timeline/html)}))})

@@ -17,7 +17,7 @@ on:
           - lazyfs
           - ha-convergence
       time-limit:
-        description: 'Time limit per test, in seconds'
+        description: 'Time limit per test, in seconds (suite=all at 90s takes ~2h; much larger values will not fit the 300-minute job timeout)'
         required: true
         default: '90'
 
@@ -28,7 +28,7 @@ permissions:
 jobs:
   jepsen:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
