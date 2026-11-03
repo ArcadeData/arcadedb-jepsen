@@ -77,8 +77,9 @@ jobs:
               run_one run-ha-convergence-tests.sh ha-convergence || OVERALL=1
               ;;
             all)
+              # run-all-tests.sh already includes the 14 follower tests, so
+              # run-follower-tests.sh is not repeated here.
               run_one run-all-tests.sh baseline || OVERALL=1
-              run_one run-follower-tests.sh follower || OVERALL=1
               run_one run-lazyfs-tests.sh lazyfs || OVERALL=1
               run_one run-ha-convergence-tests.sh ha-convergence || OVERALL=1
               ;;
