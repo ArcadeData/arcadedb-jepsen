@@ -295,6 +295,26 @@
         (warn "Could not archive data of" node ":" (.getMessage e))
         []))))
 
+(def power-loss-prefix "/tmp/power-loss-")
+(def max-power-loss-snapshots
+  "Snapshots kept per node. A test does a handful of power losses per node and the
+  backing directories are small (about 100 KB), but the cap keeps the artifact bounded."
+  12)
+
+(defn snapshot-power-loss!
+  "Right after a simulated power loss (LazyFS cache cleared, JVM killed, nothing
+  restarted yet) tars the LazyFS backing directory: the bytes that REALLY survived,
+  which is exactly what crash recovery will read. Recovery rewrites them within seconds,
+  so the final archive of the data directories cannot show them. Best effort."
+  [node]
+  (try
+    (let [n (parse-long (str/trim (c/exec :sh :-c (str "ls " power-loss-prefix "*.tar.gz 2>/dev/null | wc -l"))))]
+      (when (< n max-power-loss-snapshots)
+        (c/exec :sh :-c (str "tar -czf " power-loss-prefix (System/currentTimeMillis) ".tar.gz -C / "
+                             (subs lazyfs-backing-root 1) " 2>/dev/null; true"))))
+    (catch Exception e
+      (warn "Could not snapshot the post power-loss state of" node ":" (.getMessage e)))))
+
 (defn arcadedb
   "Returns a Jepsen DB implementation for ArcadeDB."
   []
@@ -311,7 +331,13 @@
 
     db/LogFiles
     (log-files [_ test node]
-      (into [log-file] (archive-data! test node)))
+      (into [log-file]
+            (concat (archive-data! test node)
+                    (when (lazyfs? test)
+                      (try (remove str/blank?
+                                   (str/split-lines
+                                     (c/exec :sh :-c (str "ls " power-loss-prefix "*.tar.gz 2>/dev/null; true"))))
+                           (catch Exception _ []))))))
 
     db/Kill
     (start! [_ test node]

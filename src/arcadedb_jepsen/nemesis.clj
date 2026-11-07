@@ -42,7 +42,8 @@
       (str "echo 'lazyfs::clear-cache' > " adb/lazyfs-databases-fifo " 2>/dev/null; "
            "echo 'lazyfs::clear-cache' > " adb/lazyfs-raft-fifo       " 2>/dev/null; "
            "ps aux | grep '[A]rcadeDBServer' | awk '{print $2}' | xargs kill -9 2>/dev/null; "
-           "true"))))
+           "true"))
+    (adb/snapshot-power-loss! node)))
 
 (defn- pick-power-target
   "Picks a node to power-kill. Returns nil if the safety cap is already reached.
