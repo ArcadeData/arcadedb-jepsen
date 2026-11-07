@@ -276,6 +276,25 @@
     (catch Exception e
       (warn "nuke rm-rf failed (likely stale FUSE mount):" (.getMessage e)))))
 
+(def data-archive "/tmp/arcadedb-data.tar.gz")
+
+(defn archive-data!
+  "LazyFS runs only: tars the databases and Ratis storage directories so the on-disk
+  state of a node that lost unfsynced writes is downloaded with the logs (a console
+  log alone cannot say which page was lost). Returns a vector holding the archive path,
+  or an empty vector when LazyFS is off or the archive could not be made. Must run
+  before teardown, which wipes the directories."
+  [test node]
+  (if-not (lazyfs? test)
+    []
+    (try
+      (c/exec :sh :-c (str "tar -czf " data-archive " -C / "
+                           (subs data-dir 1) " " (subs raft-dir 1) " 2>/dev/null; true"))
+      [data-archive]
+      (catch Exception e
+        (warn "Could not archive data of" node ":" (.getMessage e))
+        []))))
+
 (defn arcadedb
   "Returns a Jepsen DB implementation for ArcadeDB."
   []
@@ -292,7 +311,7 @@
 
     db/LogFiles
     (log-files [_ test node]
-      [log-file])
+      (into [log-file] (archive-data! test node)))
 
     db/Kill
     (start! [_ test node]
