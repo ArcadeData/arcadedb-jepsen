@@ -5,7 +5,7 @@
             :url  "https://www.apache.org/licenses/LICENSE-2.0"}
   :dependencies [[org.clojure/clojure "1.12.6"]
                  [jepsen "0.3.15"]
-                 [cheshire "6.2.0"]]
+                 [cheshire "6.2.1"]]
   :jvm-opts ["-Djava.awt.headless=true"
              "-server"
              "-Xmx16g"]
